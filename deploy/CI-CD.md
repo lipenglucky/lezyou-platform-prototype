@@ -1,40 +1,79 @@
 # GitHub → ECS 自动部署
 
-> 国内 ECS **无法直接 git pull GitHub**，因此采用 **GitHub Actions**：push 后打包代码 → SSH 上传到 ECS → 自动 `docker compose up -d --build`。
+> **国内 ECS 推荐 Self-hosted Runner**：GitHub 云 runner 外网 SSH 连 ECS 常失败（6–12 秒报错），改为在 ECS 本机跑 Actions。
 
 ---
 
-## 架构
+## 推荐架构（Self-hosted Runner）
 
 ```
-本地 push → GitHub (main) → Actions 打包 → SCP 到 ECS → remote-deploy.sh → Docker 重建
+本地 push → GitHub → ECS 上的 Runner 拉代码 → remote-deploy.sh → Docker 重建
 ```
 
 `.env` 和数据库卷 **保留在服务器**，不会被覆盖。
 
 ---
 
-## 一次性配置（约 15 分钟）
+## 一次性配置 Runner（约 10 分钟）
 
-### 1. 代码推送到 GitHub
+### 1. GitHub 获取 Runner Token
+
+打开：  
+https://github.com/lipenglucky/lezyou-platform-prototype/settings/actions/runners/new
+
+选 **Linux** · **x64**，复制页面上的 **token**（一次性）。
+
+### 2. ECS 安装 Runner
+
+Workbench 终端：
 
 ```bash
-cd "/Users/li_warehouse/Downloads/乐自由下单完整版_cursor 2"
+cd /opt/lezyou
+curl -fsSL -o /tmp/setup-runner.sh \
+  https://raw.githubusercontent.com/lipenglucky/lezyou-platform-prototype/main/deploy/setup-github-runner.sh
+# 若 GitHub 拉不到，用手动上传的脚本：
+# bash deploy/setup-github-runner.sh
 
-# 确认 remote
-git remote -v
-
-# 提交并推送
-git add .
-git commit -m "feat: add GitHub Actions ECS auto deploy"
-git push -u origin main
+RUNNER_TOKEN=粘贴token bash deploy/setup-github-runner.sh
 ```
 
-仓库地址示例：`git@github.com:lipenglucky/lezyou-platform-prototype.git`
+或若 `/opt/lezyou` 已有 `deploy/setup-github-runner.sh`：
+
+```bash
+cd /opt/lezyou
+RUNNER_TOKEN=粘贴token bash deploy/setup-github-runner.sh
+```
+
+### 3. 确认 Runner 在线
+
+GitHub → Settings → Actions → **Runners** → 应看到 **ecs-lezyou** 状态 **Idle**。
+
+### 4. 推送 workflow 并测试
+
+```bash
+git push origin main
+```
+
+Actions 里 **Deploy to ECS** 应在本机 runner 上跑绿。
 
 ---
 
-### 2. ECS 生成部署专用 SSH 密钥
+## 日常用法
+
+```bash
+git add .
+git commit -m "fix: 某改动"
+git push origin main
+```
+
+---
+
+## 备选：SSH 部署（海外 ECS）
+
+<details>
+<summary>展开 SSH 方式（国内 ECS 通常不可用）</summary>
+
+## 架构（SSH）
 
 在 **ECS Workbench 终端**执行：
 
@@ -105,20 +144,7 @@ ssh -i ~/github_deploy root@47.113.186.224 "echo SSH OK"
 
 ---
 
-## 日常使用
-
-```bash
-# 本地改完代码
-git add .
-git commit -m "fix: 描述改动"
-git push origin main
-```
-
-推送后打开 GitHub → **Actions** 标签，查看 **Deploy to ECS** 工作流。
-
-约 **5–15 分钟** 后 ECS 自动更新，访问 `http://47.113.186.224:3000` 验证。
-
----
+</details>
 
 ## 手动触发部署
 
@@ -130,9 +156,10 @@ GitHub → Actions → Deploy to ECS → **Run workflow**
 
 | 现象 | 处理 |
 |------|------|
-| Actions SSH 连接失败 | 检查 `ECS_HOST`、私钥格式、安全组 22 端口 |
-| SCP 成功但构建失败 | Actions 日志查看 docker build 报错 |
-| 部署后 .env 丢失 | workflow 已备份 `.env`；检查 `/tmp/lezyou.env.bak` |
+| Workflow 一直 Queued | Runner 未在线；ECS 执行 `./svc.sh status` |
+| Runner 注册失败 | Token 过期，重新 New self-hosted runner 获取 |
+| 构建失败 | Actions 日志查看 docker build 报错 |
+| 部署后 .env 丢失 | rsync 已排除 `.env`；检查 `/tmp/lezyou.env.bak` |
 | 页面 502 | `docker compose ps` + `docker compose logs app` |
 
 ECS 上手动部署（不经过 GitHub）：
