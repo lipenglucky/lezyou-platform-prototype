@@ -67,7 +67,29 @@ cat /root/.ssh/github_deploy
 
 ### 4. 确认 ECS 安全组
 
-入方向放行 **TCP 22**（GitHub Actions 服务器 IP 不固定，内测可临时 `0.0.0.0/0`，正式建议换固定 IP 或 self-hosted runner）。
+入方向放行 **TCP 22**（GitHub Actions IP 不固定，内测需填 `0.0.0.0/0`）。
+
+### 4.1 确认 ECS 上 authorized_keys
+
+```bash
+# Workbench 执行
+cat /root/.ssh/github_deploy.pub >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+grep github-actions /root/.ssh/authorized_keys
+```
+
+### 4.2 ECS_SSH_KEY 格式（最常见失败原因）
+
+粘贴到 GitHub Secret 时必须**完整保留换行**，格式如下：
+
+```
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAA...
+...多行...
+-----END OPENSSH PRIVATE KEY-----
+```
+
+❌ 不要加引号、不要合并成一行、不要有多余空格。
 
 ---
 
