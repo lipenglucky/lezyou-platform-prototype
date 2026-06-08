@@ -13,50 +13,71 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Lightbulb, Repeat, ShieldCheck, Sparkles, User } from "lucide-react";
+import {
+  Building2,
+  Crown,
+  Lightbulb,
+  Repeat,
+  ShieldCheck,
+  Sparkles,
+  User,
+  Users,
+} from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
+import {
+  DEMO_IDENTITIES,
+  inferDemoIdentityKey,
+  type DemoIdentityKey,
+} from "@/lib/demo-accounts";
 import type { Role } from "@/lib/types";
 
-const ROLE_OPTIONS: { value: Role; label: string; route: string; icon: any; description: string }[] = [
-  {
-    value: "client",
-    label: "委托人 · 林家三口",
-    route: "/client",
-    icon: User,
-    description: "个人委托人,正在装修上海徐汇复式住宅。",
-  },
-  {
-    value: "designer",
-    label: "设计师 · 陈牧之",
-    route: "/designer",
-    icon: Sparkles,
-    description: "12 年经验建筑设计师,手上 3 单进行中。",
-  },
-  {
-    value: "admin",
-    label: "管理员 · 平台总后台",
-    route: "/admin",
-    icon: ShieldCheck,
-    description: "审核入驻、监管订单、处理纠纷。",
-  },
-  {
-    value: "guest",
-    label: "访客 · 公开浏览",
-    route: "/",
-    icon: Lightbulb,
-    description: "未登录状态,只能浏览设计师与悬赏。",
-  },
-];
+const ICON_BY_KEY: Record<DemoIdentityKey, typeof User> = {
+  client: User,
+  designer: Sparkles,
+  designer_team: Users,
+  designer_company: Building2,
+  admin: ShieldCheck,
+  super_admin: Crown,
+  guest: Lightbulb,
+};
 
 export function RoleSwitcherFab() {
   const [open, setOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const router = useRouter();
-  const { role, setRole } = useRoleStore();
+  const { role, identityId, setRole } = useRoleStore();
 
   useEffect(() => setHydrated(true), []);
   if (!hydrated) return null;
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "off") return null;
 
-  const current = ROLE_OPTIONS.find((r) => r.value === role) ?? ROLE_OPTIONS[3];
+  const currentKey = inferDemoIdentityKey(role, identityId);
+  const current =
+    DEMO_IDENTITIES.find((d) => d.key === currentKey) ??
+    DEMO_IDENTITIES[DEMO_IDENTITIES.length - 1];
+
+  const handleSwitch = async (key: DemoIdentityKey) => {
+    if (switching) return;
+    const opt = DEMO_IDENTITIES.find((d) => d.key === key);
+    if (!opt) return;
+
+    setSwitching(true);
+    try {
+      const res = await apiFetch<{ role: Role; identityId: string }>(
+        "/api/auth/demo-login",
+        { method: "POST", body: JSON.stringify({ role: key }) },
+      );
+      setRole(res.role, res.identityId);
+    } catch {
+      setRole(opt.sessionRole, opt.designerId);
+    } finally {
+      setSwitching(false);
+      setOpen(false);
+      router.push(opt.route);
+      router.refresh();
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -77,22 +98,19 @@ export function RoleSwitcherFab() {
         <DialogHeader>
           <DialogTitle>演示身份切换</DialogTitle>
           <DialogDescription>
-            原型阶段的便利功能：一键切换三种身份(委托人 / 设计师 / 管理员),
+            原型阶段的便利功能：一键切换委托人、个人设计师、设计团队、设计公司、管理员与超级管理员，
             查看同一笔订单在不同视角下的呈现。
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-2.5">
-          {ROLE_OPTIONS.map((opt) => {
-            const Icon = opt.icon;
-            const isCurrent = opt.value === role;
+          {DEMO_IDENTITIES.map((opt) => {
+            const Icon = ICON_BY_KEY[opt.key];
+            const isCurrent = opt.key === currentKey;
             return (
               <button
-                key={opt.value}
-                onClick={() => {
-                  setRole(opt.value);
-                  setOpen(false);
-                  router.push(opt.route);
-                }}
+                key={opt.key}
+                disabled={switching}
+                onClick={() => handleSwitch(opt.key)}
                 className={`flex items-start gap-3 rounded-xl border p-4 text-left transition-all ${
                   isCurrent
                     ? "border-ink bg-ink-20/30"

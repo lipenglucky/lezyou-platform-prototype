@@ -92,4 +92,49 @@ export const reviewQueue: ReviewItem[] = [
       驳回理由: "营业执照影像不清晰,请重新上传",
     },
   },
+  {
+    id: "rv_promo_1",
+    type: "designer_promotion",
+    name: "唐羽 · 见习晋级",
+    submittedAt: "2026-05-01T08:00:00+08:00",
+    status: "pending",
+    refId: "designer_tang",
+    payload: {
+      当前等级: "见习设计师",
+      申请晋升: "中级设计师v1",
+      完成订单: "厦门鼓浪屿民宿 · 概念方案",
+      订单编号: "AD2026041503",
+      设计师编号: "DS000007",
+      完成时间: "2026-04-28",
+    },
+  },
+  {
+    id: "rv_promo_2",
+    type: "designer_level_promotion",
+    name: "陈墨白 · 等级晋级",
+    submittedAt: "2026-05-28T10:00:00+08:00",
+    status: "pending",
+    refId: "designer_chen",
+    payload: {
+      当前等级: "中级设计师v1",
+      申请晋升: "高级设计师v1",
+      完成订单数: "6",
+      单均评价: "4.72",
+      最低单评: "4.5",
+      设计师编号: "DS000001",
+    },
+  },
 ];
+
+/** 演示用待处理工单（API 无数据时合并展示） */
+export function getDemoPendingReviewCounts() {
+  const pending = reviewQueue.filter((r) => r.status === "pending");
+  return {
+    designer: pending.filter((r) => r.type === "designer").length,
+    enterprise: pending.filter((r) => r.type === "enterprise").length,
+    promotion: pending.filter((r) => r.type === "designer_promotion").length,
+    levelPromotion: pending.filter(
+      (r) => r.type === "designer_level_promotion",
+    ).length,
+  };
+}

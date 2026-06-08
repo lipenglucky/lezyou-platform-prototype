@@ -65,7 +65,7 @@ export default function ClientSettingsPage() {
             "订单状态变化(默认开启)",
             "设计师上传新成果",
             "悬赏报名提醒",
-            "按月雇佣续约提醒(20 号前)",
+            "按月雇佣续费提醒(每月 25 号前)",
           ].map((item, i) => (
             <label
               key={i}

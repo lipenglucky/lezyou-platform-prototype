@@ -1,10 +1,17 @@
 "use client";
 
+import Link from "next/link";
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { clientWallet, clientTransactions } from "@/mocks/wallet";
+import { ProjectIdCopy } from "@/components/domain/project-id-copy";
+import { InvoiceRequestDialog } from "@/components/domain/invoice-request-dialog";
+import { useClient, useOrders, useWallet } from "@/lib/use-data";
+import { isInvoiceEligibleTransaction } from "@/lib/invoice";
+import { isProjectId } from "@/lib/project-id";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
+import type { Order, WalletTransaction } from "@/lib/types";
+import { useRoleStore } from "@/store/role-store";
 import {
   CircleDollarSign,
   PiggyBank,
@@ -12,9 +19,33 @@ import {
   Wallet,
   Receipt,
   ChevronRight,
+  FileText,
 } from "lucide-react";
 
 export default function ClientWalletPage() {
+  const identityId = useRoleStore((s) => s.identityId);
+  const { data: wallet, refresh: refreshWallet } = useWallet();
+  const { data: orders } = useOrders();
+  const { data: client } = useClient(identityId);
+  const clientWallet = wallet.summary;
+  const clientTransactions = wallet.transactions;
+
+  const [invoiceTx, setInvoiceTx] = useState<WalletTransaction | null>(null);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+
+  const orderByCode = useMemo(() => {
+    const map = new Map<string, Order>();
+    for (const order of orders) {
+      map.set(order.code, order);
+    }
+    return map;
+  }, [orders]);
+
+  const openInvoice = (tx: WalletTransaction) => {
+    setInvoiceTx(tx);
+    setInvoiceOpen(true);
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -22,7 +53,7 @@ export default function ClientWalletPage() {
           钱包 · 支付记录
         </h2>
         <p className="mt-1 text-sm text-ink-60">
-          管理预存余额、付款方式,查看历史付款与平台托管资金。
+          管理预存余额，查看历史付款与平台托管资金；已完成支付可申请开具电子发票。
         </p>
       </div>
 
@@ -55,33 +86,6 @@ export default function ClientWalletPage() {
       </div>
 
       <Card className="p-6">
-        <div className="mb-5 flex items-center justify-between">
-          <h3 className="text-base font-semibold tracking-tight text-ink">
-            付款方式
-          </h3>
-          <Button variant="outline" size="sm">添加付款方式</Button>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {[
-            { name: "微信支付", desc: "默认付款方式", primary: true },
-            { name: "支付宝", desc: "可选" },
-            { name: "企业对公转账", desc: "需上传付款回单" },
-          ].map((p) => (
-            <div
-              key={p.name}
-              className={`flex items-center justify-between rounded-xl border p-4 ${p.primary ? "border-ink bg-ink-20/30" : "border-ink-20"}`}
-            >
-              <div>
-                <div className="text-sm font-medium text-ink">{p.name}</div>
-                <div className="text-xs text-ink-60">{p.desc}</div>
-              </div>
-              {p.primary ? <Badge variant="brand">默认</Badge> : null}
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <Card className="p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold tracking-tight text-ink">
             支付记录
@@ -92,32 +96,119 @@ export default function ClientWalletPage() {
         </div>
         <div className="space-y-2.5">
           {clientTransactions.map((t) => (
-            <div
+            <PaymentRecordRow
               key={t.id}
-              className="flex items-center justify-between rounded-xl border border-ink-20 p-4"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-ink-20/40">
-                  <Receipt className="h-4 w-4 text-ink-60" />
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-ink">{t.note}</div>
-                  <div className="text-xs text-ink-60">
-                    {t.orderCode ? `订单 ${t.orderCode} · ` : ""}
-                    {formatDateTime(t.occurredAt)}
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-base font-semibold text-ink">
-                  {formatCurrency(t.amount)}
-                </div>
-                <div className="text-xs text-ink-60">资金已托管</div>
-              </div>
-            </div>
+              transaction={t}
+              orderByCode={orderByCode}
+              onInvoice={() => openInvoice(t)}
+            />
           ))}
         </div>
       </Card>
+
+      <InvoiceRequestDialog
+        open={invoiceOpen}
+        onOpenChange={setInvoiceOpen}
+        transaction={invoiceTx}
+        client={client}
+        onIssued={() => refreshWallet()}
+      />
+    </div>
+  );
+}
+
+function resolveOrderInfo(
+  transaction: WalletTransaction,
+  orderByCode: Map<string, Order>,
+) {
+  const matched = transaction.orderCode
+    ? orderByCode.get(transaction.orderCode)
+    : undefined;
+  const orderId = transaction.orderId ?? matched?.id;
+  const orderTitle = transaction.orderTitle ?? matched?.title;
+  const orderCode = transaction.orderCode ?? matched?.code;
+  const href = orderId ? `/client/orders/${orderId}` : undefined;
+  return { orderId, orderTitle, orderCode, href };
+}
+
+function PaymentRecordRow({
+  transaction,
+  orderByCode,
+  onInvoice,
+}: {
+  transaction: WalletTransaction;
+  orderByCode: Map<string, Order>;
+  onInvoice: () => void;
+}) {
+  const { orderTitle, orderCode, href } = resolveOrderInfo(
+    transaction,
+    orderByCode,
+  );
+  const canInvoice = isInvoiceEligibleTransaction(transaction);
+  const hasInvoice = !!transaction.invoiceId || !!transaction.invoiceNo;
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-ink-20 p-4">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ink-20/40">
+          <Receipt className="h-4 w-4 text-ink-60" />
+        </div>
+        <div className="min-w-0 space-y-1">
+          <div className="text-sm font-medium text-ink">{transaction.note}</div>
+          {href && (orderTitle || orderCode) ? (
+            <Link
+              href={href}
+              className="group block min-w-0 rounded-md transition-colors hover:bg-ink-20/30"
+            >
+              {orderTitle ? (
+                <div className="truncate text-sm font-medium text-ink group-hover:text-brand">
+                  {orderTitle}
+                </div>
+              ) : null}
+              {orderCode ? (
+                <div className="flex items-center gap-1 group-hover:text-brand">
+                  {isProjectId(orderCode) ? (
+                    <ProjectIdCopy code={orderCode} compact />
+                  ) : (
+                    <span className="text-xs text-ink-60">订单编号 {orderCode}</span>
+                  )}
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-60 opacity-0 transition-opacity group-hover:opacity-100" />
+                </div>
+              ) : null}
+            </Link>
+          ) : orderCode ? (
+            <div className="text-xs text-ink-60">订单编号 {orderCode}</div>
+          ) : null}
+          <div className="text-xs text-ink-60">
+            {formatDateTime(transaction.occurredAt)}
+          </div>
+        </div>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-2 pl-2 text-right">
+        <div className="text-base font-semibold text-ink">
+          {formatCurrency(transaction.amount)}
+        </div>
+        <div className="text-xs text-ink-60">
+          {transaction.amount < 0 ? "资金已托管" : transaction.status}
+        </div>
+        {canInvoice || hasInvoice ? (
+          <Button
+            type="button"
+            variant={hasInvoice ? "outline" : "brand"}
+            size="sm"
+            className="h-8 gap-1.5 px-2.5 text-xs"
+            onClick={onInvoice}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            {hasInvoice ? "查看发票" : "开发票"}
+          </Button>
+        ) : null}
+        {hasInvoice && transaction.invoiceNo ? (
+          <div className="text-[10px] tabular-nums text-brand">
+            {transaction.invoiceNo}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

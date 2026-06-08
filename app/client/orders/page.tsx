@@ -1,26 +1,15 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Card } from "@/components/ui/card";
-import { OrderRow } from "@/components/domain/order-row";
-import { orders } from "@/mocks/orders";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ORDER_STATUS_META } from "@/lib/constants";
-import type { OrderStatus } from "@/lib/types";
-import { useSessionStore } from "@/store/session-store";
-import { Badge } from "@/components/ui/badge";
-
-const STATUSES: { value: OrderStatus | "all"; label: string }[] = [
-  { value: "all", label: "全部" },
-  { value: "matching", label: ORDER_STATUS_META.matching.label },
-  { value: "pending_contract", label: ORDER_STATUS_META.pending_contract.label },
-  { value: "in_progress", label: ORDER_STATUS_META.in_progress.label },
-  { value: "pending_review", label: ORDER_STATUS_META.pending_review.label },
-  { value: "in_revision", label: ORDER_STATUS_META.in_revision.label },
-  { value: "completed", label: ORDER_STATUS_META.completed.label },
-  { value: "terminated", label: ORDER_STATUS_META.terminated.label },
-];
+import { Button } from "@/components/ui/button";
+import { CLIENT_ORDER_FOCUS_META } from "@/lib/client-order-focus";
+import { ScheduleRequestPanel } from "@/components/domain/schedule-request-panel";
+import { UnifiedProjectList } from "@/components/domain/unified-project-list";
+import { useScheduleRequests } from "@/lib/use-data";
+import { useRoleStore } from "@/store/role-store";
+import type { ClientOrderFocus } from "@/lib/client-order-focus";
 
 export default function ClientOrdersPage() {
   return (
@@ -30,76 +19,75 @@ export default function ClientOrdersPage() {
   );
 }
 
+const FOCUS_VALUES = [
+  "pending_payment",
+  "pending_acceptance",
+  "pending_contract",
+  "after_sales",
+] as const;
+
+function parseFocusParam(value: string | null): ClientOrderFocus | null {
+  if (!value) return null;
+  return FOCUS_VALUES.includes(value as ClientOrderFocus)
+    ? (value as ClientOrderFocus)
+    : null;
+}
+
 function ClientOrdersInner() {
   const params = useSearchParams();
-  const isNew = params.get("new") === "1";
-  const [tab, setTab] = useState<OrderStatus | "all">("all");
-  const draftOrders = useSessionStore((s) => s.draftOrders);
+  const focus = parseFocusParam(params.get("focus"));
+  const identityId = useRoleStore((s) => s.identityId);
+  const clientId = identityId ?? "";
+  const { data: scheduleRequests, refresh: refreshSchedule } =
+    useScheduleRequests();
 
-  const filtered = useMemo(() => {
-    return orders.filter((o) => (tab === "all" ? true : o.status === tab));
-  }, [tab]);
-
-  const counts = useMemo(() => {
-    return STATUSES.map((s) => ({
-      value: s.value,
-      count:
-        s.value === "all"
-          ? orders.length
-          : orders.filter((o) => o.status === s.value).length,
-    }));
-  }, []);
+  const myScheduleRequests = scheduleRequests.filter(
+    (r) =>
+      r.clientId === clientId &&
+      (r.status === "pending" ||
+        r.status === "accepted" ||
+        r.status === "rejected"),
+  );
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight text-ink">
-          我的订单
-        </h2>
-        <p className="mt-1 text-sm text-ink-60">
-          按状态查看你的全部委托项目,点击进入查看详情、付款、验收。
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight text-ink">
+            {focus ? CLIENT_ORDER_FOCUS_META[focus].label : "平台订单"}
+          </h2>
+          <p className="mt-1 text-sm text-ink-60">
+            {focus
+              ? CLIENT_ORDER_FOCUS_META[focus].description
+              : "定向下单、扫码下单、按工时/按月等常规委托项目，可按类型与状态筛选。"}
+          </p>
+        </div>
+        {focus ? (
+          <Button asChild variant="outline" size="sm">
+            <Link href="/client/orders">查看全部平台订单</Link>
+          </Button>
+        ) : null}
       </div>
 
-      {isNew && draftOrders.length > 0 && (
-        <Card className="flex items-center justify-between bg-emerald-50 p-4 text-sm text-emerald-800">
-          <div>
-            <strong>新订单已创建!</strong> 编号 {draftOrders[draftOrders.length - 1].id}{" "}
-            正在等待设计师签约。原型阶段订单存在浏览器本地。
-          </div>
-          <Badge variant="emerald">最新</Badge>
-        </Card>
-      )}
+      {myScheduleRequests.length > 0 ? (
+        <ScheduleRequestPanel
+          requests={myScheduleRequests}
+          perspective="client"
+          onUpdated={refreshSchedule}
+        />
+      ) : null}
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
-        <TabsList className="flex flex-wrap gap-1 overflow-auto">
-          {STATUSES.map((s) => (
-            <TabsTrigger key={s.value} value={s.value} className="gap-1.5">
-              {s.label}
-              <span className="rounded-full bg-ink-20/50 px-1.5 py-0 text-[10px] font-medium text-ink-60 data-[state=active]:bg-white/20 data-[state=active]:text-white">
-                {counts.find((c) => c.value === s.value)?.count}
-              </span>
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
-
-      <div className="space-y-4">
-        {filtered.length === 0 ? (
-          <Card className="p-16 text-center text-ink-60">
-            该状态下暂无订单。
-          </Card>
-        ) : (
-          filtered.map((o) => (
-            <OrderRow
-              key={o.id}
-              order={o}
-              href={`/client/orders/${o.id}`}
-              perspective="client"
-            />
-          ))
-        )}
-      </div>
+      <UnifiedProjectList
+        perspective="client"
+        identityId={clientId}
+        platformOrdersOnly
+        initialFocus={focus}
+        emptyLabel={
+          focus
+            ? "该分类下暂无相关订单。"
+            : "暂无平台订单，可切换「全部」查看各类型。"
+        }
+      />
     </div>
   );
 }

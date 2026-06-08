@@ -1,17 +1,57 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { bounties } from "@/mocks/bounties";
+import { BountyApplyDialog } from "@/components/domain/bounty-apply-dialog";
+import { useBounties } from "@/lib/use-data";
+import { useDesigner } from "@/lib/use-data";
+import { useRoleStore } from "@/store/role-store";
+import { useSessionStore } from "@/store/session-store";
+import { bountyApplicantCount } from "@/lib/bounty-privacy";
+import type { Bounty } from "@/lib/types";
 import { Megaphone, Users } from "lucide-react";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatBountyReward, formatDate } from "@/lib/utils";
+import {
+  designerCanAcceptOrders,
+  portfolioReadinessHint,
+} from "@/lib/designer-portfolio-readiness";
 
 export default function DesignerBountiesPage() {
-  const matchingBounties = bounties.filter(
-    (b) => b.specialty === "architecture",
-  );
+  const identityId = useRoleStore((s) => s.identityId);
+  const { data: bounties, refresh } = useBounties();
+  const { data: designer } = useDesigner(identityId);
+  const push = useSessionStore((s) => s.pushNotification);
+  const [applyTarget, setApplyTarget] = useState<Bounty | null>(null);
+
+  const matchingBounties = designer
+    ? bounties.filter((b) => b.specialty === designer.specialty)
+    : bounties.filter((b) => b.status === "open");
+
+  const canAccept = designer ? designerCanAcceptOrders(designer) : false;
+
+  const handleApplyClick = (bounty: Bounty) => {
+    if (!canAccept) {
+      push({
+        title: "请先上传项目类型案例",
+        description: designer ? portfolioReadinessHint(designer) : undefined,
+        variant: "destructive",
+      });
+      return;
+    }
+    setApplyTarget(bounty);
+  };
+
+  const handleApplySuccess = () => {
+    push({
+      title: "报名成功",
+      description: "已提交报名，等待发布方查看。",
+      variant: "success",
+    });
+    refresh();
+  };
 
   return (
     <div className="space-y-6">
@@ -48,23 +88,40 @@ export default function DesignerBountiesPage() {
                 </p>
                 <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-ink-60">
                   <span className="inline-flex items-center gap-1">
-                    <Users className="h-3.5 w-3.5" /> 已有 {b.applicants.length} 位报名
+                    <Users className="h-3.5 w-3.5" /> 已有{" "}
+                    {bountyApplicantCount(b)} 位报名
                   </span>
-                  <span>截止 {formatDate(b.deadline)}</span>
+                  <span>成果提交 {formatDate(b.deadline)}</span>
                 </div>
               </div>
               <div className="flex flex-col items-end gap-2">
                 <div className="text-xl font-bold text-brand">
-                  {b.rewardModel === "negotiable"
-                    ? "面议"
-                    : formatCurrency(b.reward)}
+                  {formatBountyReward(b.reward)}
                 </div>
-                <Button>立即报名</Button>
+                {identityId && b.applicants.some((a) => a.designerId === identityId) ? (
+                  <Button disabled variant="outline">
+                    已报名
+                  </Button>
+                ) : (
+                  <Button onClick={() => handleApplyClick(b)}>立即报名</Button>
+                )}
               </div>
             </div>
           </Card>
         ))}
       </div>
+
+      {applyTarget ? (
+        <BountyApplyDialog
+          bounty={applyTarget}
+          designer={designer}
+          open={!!applyTarget}
+          onOpenChange={(open) => {
+            if (!open) setApplyTarget(null);
+          }}
+          onSuccess={handleApplySuccess}
+        />
+      ) : null}
     </div>
   );
 }

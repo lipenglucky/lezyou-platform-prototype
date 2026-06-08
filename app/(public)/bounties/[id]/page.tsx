@@ -1,34 +1,51 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { bounties, getBountyById } from "@/mocks/bounties";
-import { getDesignerById } from "@/mocks/designers";
+import { getBounty, listDesigners } from "@/lib/server/repo";
+import { getSessionUser } from "@/lib/server/auth";
+import {
+  bountyApplicantCount,
+  canViewBountyApplicantDetailsInPublicHall,
+} from "@/lib/bounty-privacy";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { BountyApplicantList } from "@/components/domain/bounty-applicant-list";
 import { SpecialtyBadge } from "@/components/domain/status-badges";
 import {
   CalendarDays,
   Coins,
   Download,
   FileBox,
-  Star,
+  MapPin,
   Users,
 } from "lucide-react";
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
+import { getTrackLabelParts } from "@/lib/bounty-filters";
+import { formatBountyReward, formatDate, formatDateTime } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 
-export function generateStaticParams() {
-  return bounties.map((b) => ({ id: b.id }));
-}
+export const dynamic = "force-dynamic";
 
-export default function BountyDetailPage({
+export default async function BountyDetailPage({
   params,
 }: {
   params: { id: string };
 }) {
-  const bounty = getBountyById(params.id);
-  if (!bounty) notFound();
+  const [bounty, allDesigners, session] = await Promise.all([
+    getBounty(params.id),
+    listDesigners(),
+    getSessionUser(),
+  ]);
+  if (!bounty) {
+    return (
+      <div className="container-page py-20 text-center text-ink-60">
+        未找到该悬赏。
+      </div>
+    );
+  }
+
+  const trackLabels = getTrackLabelParts(bounty.primaryTrack);
+  const applicantCount = bountyApplicantCount(bounty);
+  const showApplicantDetails =
+    canViewBountyApplicantDetailsInPublicHall(session);
 
   return (
     <div className="container-page py-10">
@@ -37,8 +54,22 @@ export default function BountyDetailPage({
           <Card className="p-8">
             <div className="flex flex-wrap items-center gap-2">
               <SpecialtyBadge specialty={bounty.specialty} />
+              <Badge variant="muted">{trackLabels.l1}</Badge>
+              {trackLabels.l2 ? (
+                <Badge variant="outline" className="text-[10px]">
+                  二级 · {trackLabels.l2}
+                </Badge>
+              ) : null}
+              {trackLabels.l3 ? (
+                <Badge variant="outline" className="text-[10px]">
+                  三级 · {trackLabels.l3}
+                </Badge>
+              ) : null}
               {bounty.status === "open" && (
                 <Badge variant="emerald">开放报名</Badge>
+              )}
+              {bounty.status === "paused" && (
+                <Badge variant="amber">已暂停报名</Badge>
               )}
               {bounty.status === "in_review" && (
                 <Badge variant="amber">审核中</Badge>
@@ -50,10 +81,17 @@ export default function BountyDetailPage({
             </h1>
             <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs text-ink-60">
               <span className="inline-flex items-center gap-1.5">
-                <CalendarDays className="h-3.5 w-3.5" /> 截止 {formatDate(bounty.deadline)}
+                <MapPin className="h-3.5 w-3.5" /> {bounty.location.label}
+              </span>
+              {bounty.projectType ? (
+                <span>类型 · {bounty.projectType}</span>
+              ) : null}
+              <span className="inline-flex items-center gap-1.5">
+                <CalendarDays className="h-3.5 w-3.5" /> 成果提交{" "}
+                {formatDate(bounty.deadline)}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Users className="h-3.5 w-3.5" /> {bounty.applicants.length} 位设计师报名
+                <Users className="h-3.5 w-3.5" /> {applicantCount} 位设计师报名
               </span>
               <span>发布于 {formatDateTime(bounty.publishedAt)}</span>
             </div>
@@ -105,57 +143,34 @@ export default function BountyDetailPage({
           </Card>
 
           <Card className="p-8">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold tracking-tight text-ink">
-                  报名设计师
-                </h2>
-                <p className="mt-1 text-sm text-ink-60">
-                  {bounty.applicants.length} 位设计师已申请,你可以挑选合作方
+            <div className="mb-5">
+              <h2 className="text-xl font-semibold tracking-tight text-ink">
+                报名情况
+              </h2>
+              <p className="mt-1 text-sm text-ink-60">
+                已有 <strong className="text-ink">{applicantCount}</strong>{" "}
+                位设计师报名
+              </p>
+            </div>
+            {showApplicantDetails ? (
+              <BountyApplicantList bounty={bounty} designers={allDesigners} />
+            ) : (
+              <div className="rounded-xl border border-ink-20 bg-ink-20/15 p-5 text-sm text-ink-60">
+                <p>
+                  悬赏大厅仅展示报名人数，不公开报名设计师的具体资料与报价。
+                </p>
+                <p className="mt-2">
+                  若你是本项目发布方，请前往
+                  <Link
+                    href={`/client/bounties/${bounty.id}`}
+                    className="mx-1 font-medium text-brand hover:underline"
+                  >
+                    委托人工作台 · 我的悬赏
+                  </Link>
+                  查看报名详情并选择合作设计师。
                 </p>
               </div>
-            </div>
-            <div className="space-y-3">
-              {bounty.applicants.map((a) => {
-                const d = getDesignerById(a.designerId);
-                if (!d) return null;
-                return (
-                  <Card key={a.designerId} className="p-5">
-                    <div className="flex flex-wrap items-start gap-4">
-                      <Avatar className="h-12 w-12">
-                        <AvatarImage src={d.avatar} alt={d.name} />
-                        <AvatarFallback>{d.name.slice(0, 1)}</AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            href={`/designers/${d.id}`}
-                            className="text-base font-semibold text-ink hover:text-brand"
-                          >
-                            {d.name}
-                          </Link>
-                          <SpecialtyBadge specialty={d.specialty} />
-                          <span className="inline-flex items-center gap-1 text-xs text-ink-60">
-                            <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-                            {d.rating} · {d.completedProjects} 单经验
-                          </span>
-                        </div>
-                        <p className="text-sm text-ink-80">{a.proposal}</p>
-                        <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-ink-60">
-                          <span>报价 <strong className="text-ink">{formatCurrency(a.quotedAmount)}</strong></span>
-                          <span>预计工期 <strong className="text-ink">{a.estimatedDays} 天</strong></span>
-                          <span>报名 {formatDateTime(a.appliedAt)}</span>
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <Button>选择该设计师</Button>
-                        <Button variant="outline">私信沟通</Button>
-                      </div>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
+            )}
           </Card>
         </div>
 
@@ -165,30 +180,24 @@ export default function BountyDetailPage({
               悬赏金额
             </div>
             <div className="mt-2 text-3xl font-bold tracking-tight text-brand">
-              {bounty.rewardModel === "negotiable"
-                ? "面议"
-                : formatCurrency(bounty.reward)}
+              {formatBountyReward(bounty.reward)}
             </div>
             <p className="mt-1 text-xs text-ink-60">
-              {bounty.rewardModel === "fixed"
-                ? "选定设计师后资金转入平台托管"
-                : "可在选定设计师后协商最终金额"}
+              选定设计师后资金转入平台托管
             </p>
 
             <Separator className="my-5" />
 
             <div className="space-y-3 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-ink-60">截止时间</span>
+                <span className="text-ink-60">成果提交时间</span>
                 <span className="font-medium text-ink">
                   {formatDate(bounty.deadline)}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-ink-60">报名设计师</span>
-                <span className="font-medium text-ink">
-                  {bounty.applicants.length} 位
-                </span>
+                <span className="font-medium text-ink">{applicantCount} 位</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-ink-60">资料附件</span>
@@ -198,11 +207,17 @@ export default function BountyDetailPage({
               </div>
             </div>
 
-            <Button asChild variant="brand" size="lg" className="mt-6 w-full">
-              <Link href={`/login?role=designer`}>
-                <Coins className="h-4 w-4" /> 我是设计师 · 立即报名
-              </Link>
-            </Button>
+            {session?.role === "client" ? (
+              <div className="mt-6 rounded-xl border border-ink-20 bg-ink-20/15 p-4 text-sm leading-relaxed text-ink-60">
+                当前为委托人身份，如需报名，需要切换为设计身份。
+              </div>
+            ) : (
+              <Button asChild variant="brand" size="lg" className="mt-6 w-full">
+                <Link href={`/login?role=designer`}>
+                  <Coins className="h-4 w-4" /> 我是设计师 · 立即报名
+                </Link>
+              </Button>
+            )}
           </Card>
 
           <Card className="p-6">

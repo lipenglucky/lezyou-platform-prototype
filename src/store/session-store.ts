@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { HalfDaySlot, ScheduleRequest, ServiceMode } from "@/lib/types";
 
 export interface DemoNotification {
   id: string;
@@ -11,14 +12,43 @@ export interface DemoNotification {
   createdAt: number;
 }
 
+export interface DraftOrderPayload {
+  title: string;
+  serviceMode: ServiceMode;
+  billingMode: "daily" | "monthly";
+  days: number;
+  months: number;
+  totalAmount: number;
+  subSpecialty: string;
+  projectType: string;
+  description: string;
+  selectedSlots: HalfDaySlot[];
+  selectedMonths?: string[];
+  address?: string;
+  scheduleFrom?: string;
+  scheduleTo?: string;
+  status: "pending_schedule" | "pending_contract" | "rejected";
+  scheduleRequestId?: string;
+}
+
 interface SessionState {
-  draftOrders: Array<{ id: string; designerId: string; createdAt: string; payload: any }>;
-  draftBounties: Array<{ id: string; createdAt: string; payload: any }>;
+  draftOrders: Array<{
+    id: string;
+    designerId: string;
+    createdAt: string;
+    payload: DraftOrderPayload;
+  }>;
+  draftBounties: Array<{ id: string; createdAt: string; payload: Record<string, unknown> }>;
+  scheduleRequests: ScheduleRequest[];
   notifications: DemoNotification[];
   pushNotification: (n: Omit<DemoNotification, "id" | "createdAt">) => void;
   dismissNotification: (id: string) => void;
-  appendDraftOrder: (designerId: string, payload: any) => string;
-  appendDraftBounty: (payload: any) => string;
+  appendDraftOrder: (designerId: string, payload: Omit<DraftOrderPayload, "status">) => string;
+  appendDraftBounty: (payload: Record<string, unknown>) => string;
+  submitScheduleRequest: (req: Omit<ScheduleRequest, "id" | "status" | "submittedAt">) => string;
+  acceptScheduleRequest: (requestId: string) => void;
+  rejectScheduleRequest: (requestId: string, reason?: string) => void;
+  getPendingScheduleForDesigner: (designerId: string) => ScheduleRequest[];
 }
 
 export const useSessionStore = create<SessionState>()(
@@ -26,6 +56,7 @@ export const useSessionStore = create<SessionState>()(
     (set, get) => ({
       draftOrders: [],
       draftBounties: [],
+      scheduleRequests: [],
       notifications: [],
       pushNotification: (n) => {
         const note: DemoNotification = {
@@ -47,7 +78,12 @@ export const useSessionStore = create<SessionState>()(
         set({
           draftOrders: [
             ...get().draftOrders,
-            { id, designerId, createdAt: new Date().toISOString(), payload },
+            {
+              id,
+              designerId,
+              createdAt: new Date().toISOString(),
+              payload: { ...payload, status: "pending_schedule" },
+            },
           ],
         });
         return id;
@@ -62,6 +98,89 @@ export const useSessionStore = create<SessionState>()(
         });
         return id;
       },
+      submitScheduleRequest: (req) => {
+        const id = `SCH-${Date.now().toString(36).toUpperCase()}`;
+        const request: ScheduleRequest = {
+          ...req,
+          id,
+          status: "pending",
+          submittedAt: new Date().toISOString(),
+        };
+        set({ scheduleRequests: [...get().scheduleRequests, request] });
+        set({
+          draftOrders: get().draftOrders.map((o) =>
+            o.id === req.orderId
+              ? {
+                  ...o,
+                  payload: {
+                    ...o.payload,
+                    scheduleRequestId: id,
+                    status: "pending_schedule" as const,
+                  },
+                }
+              : o,
+          ),
+        });
+        return id;
+      },
+      acceptScheduleRequest: (requestId) => {
+        const now = new Date().toISOString();
+        set({
+          scheduleRequests: get().scheduleRequests.map((r) =>
+            r.id === requestId
+              ? { ...r, status: "accepted" as const, respondedAt: now }
+              : r,
+          ),
+        });
+        const req = get().scheduleRequests.find((r) => r.id === requestId);
+        if (req) {
+          set({
+            draftOrders: get().draftOrders.map((o) =>
+              o.id === req.orderId
+                ? {
+                    ...o,
+                    payload: {
+                      ...o.payload,
+                      status: "pending_contract" as const,
+                    },
+                  }
+                : o,
+            ),
+          });
+        }
+      },
+      rejectScheduleRequest: (requestId, reason) => {
+        const now = new Date().toISOString();
+        set({
+          scheduleRequests: get().scheduleRequests.map((r) =>
+            r.id === requestId
+              ? {
+                  ...r,
+                  status: "rejected" as const,
+                  respondedAt: now,
+                  rejectReason: reason,
+                }
+              : r,
+          ),
+        });
+        const req = get().scheduleRequests.find((r) => r.id === requestId);
+        if (req) {
+          set({
+            draftOrders: get().draftOrders.map((o) =>
+              o.id === req.orderId
+                ? {
+                    ...o,
+                    payload: { ...o.payload, status: "rejected" as const },
+                  }
+                : o,
+            ),
+          });
+        }
+      },
+      getPendingScheduleForDesigner: (designerId) =>
+        get().scheduleRequests.filter(
+          (r) => r.designerId === designerId && r.status === "pending",
+        ),
     }),
     { name: "lezyou-session" },
   ),

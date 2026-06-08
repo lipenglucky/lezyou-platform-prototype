@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,29 +12,76 @@ import {
   Download,
   FileSignature,
   Lock,
-  Pen,
   Printer,
   ShieldCheck,
 } from "lucide-react";
-import { useSessionStore } from "@/store/session-store";
+import {
+  fetchContractViewRequest,
+  type ContractViewPayload,
+} from "@/lib/api-client";
+import { useRoleStore } from "@/store/role-store";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export default function ContractPage({ params }: { params: { id: string } }) {
-  const push = useSessionStore((s) => s.pushNotification);
-  const [signedByDesigner, setSignedByDesigner] = useState(true);
-  const [signedByClient, setSignedByClient] = useState(false);
+  const role = useRoleStore((s) => s.role);
+  const [data, setData] = useState<ContractViewPayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const allSigned = signedByDesigner && signedByClient;
+  useEffect(() => {
+    let active = true;
+    fetchContractViewRequest(params.id)
+      .then((payload) => {
+        if (active) setData(payload);
+      })
+      .catch((e) => {
+        if (active) setError(e instanceof Error ? e.message : "加载失败");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [params.id]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#FAFAFA] py-20 text-center text-ink-60">
+        正在加载合同...
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="min-h-screen bg-[#FAFAFA] py-20 text-center">
+        <p className="text-ink-60">{error ?? "合同不存在"}</p>
+        <Button asChild variant="outline" className="mt-4">
+          <Link href="/client/orders">返回订单</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  const { order, client, designer } = data;
+  const signedByClient = order.clientSignedContract === true;
+  const signedByDesigner = order.designerSignedContract === true;
+  const allSigned = signedByClient && signedByDesigner;
+  const orderHref =
+    role === "designer"
+      ? `/designer/orders/${order.id}`
+      : `/client/orders/${order.id}`;
 
   return (
     <div className="min-h-screen bg-[#FAFAFA]">
       <div className="container-page py-10">
         <div className="mb-4 flex items-center justify-between">
           <Link
-            href="/client/orders"
+            href={orderHref}
             className="inline-flex items-center gap-1 text-sm text-ink-60 hover:text-ink"
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> 返回我的订单
+            <ArrowLeft className="h-3.5 w-3.5" /> 返回订单详情
           </Link>
           <div className="flex gap-2">
             <Button variant="outline" size="sm">
@@ -57,57 +104,51 @@ export default function ContractPage({ params }: { params: { id: string } }) {
                 乐自由设计服务协议
               </h1>
               <div className="mt-2 text-sm text-white/70">
-                合同编号 · {params.id}
+                合同编号 · {params.id} · 项目 {order.code}
               </div>
             </div>
 
             <div className="space-y-6 p-8 text-sm leading-relaxed text-ink">
               <Section title="一、合同主体">
-                <Row label="甲方(委托人)">林家三口 · 个人</Row>
-                <Row label="乙方(设计师)">陈牧之 · 上海市徐汇区</Row>
+                <Row label="甲方(委托人)">
+                  {client?.name ?? "委托人"} ·{" "}
+                  {client?.type === "enterprise" ? "企业" : "个人"}
+                </Row>
+                <Row label="乙方(设计师)">
+                  {designer?.name ?? "待匹配"} · {designer?.location ?? "—"}
+                </Row>
                 <Row label="平台监管方">乐自由设计服务平台</Row>
               </Section>
 
               <Section title="二、服务内容">
-                <p className="text-ink-80">
-                  乙方为甲方提供「上海徐汇 · 复式住宅整装设计」服务,具体包括:
-                </p>
-                <ul className="mt-2 list-disc space-y-1 pl-6 text-ink-80">
-                  <li>方案概念深化(含效果图 5 张以上)</li>
-                  <li>施工图全套(含建筑、机电、定制家具)</li>
-                  <li>软装陈设方案与采购清单</li>
-                  <li>关键节点驻场指导(2 次)</li>
-                </ul>
+                <p className="font-medium text-ink">{order.title}</p>
+                <p className="mt-2 text-ink-80">{order.description}</p>
+                <Row label="项目类型">{order.projectType}</Row>
+                <Row label="预期交付">{formatDate(order.expectedDeliveryAt)}</Row>
               </Section>
 
               <Section title="三、服务费用与付款节点">
-                <Row label="合同总价款">{formatCurrency(28000)}(含税)</Row>
-                <Row label="平台手续费率">8%(由乙方承担)</Row>
+                <Row label="合同总价款">
+                  {formatCurrency(order.totalAmount)}（含税）
+                </Row>
+                <Row label="平台手续费率">
+                  {Math.round((order.feeRate ?? 0.08) * 100)}%（由乙方承担）
+                </Row>
                 <div className="mt-3 grid gap-2">
-                  <PaymentRow stage="预付款 · 30%" amount={8400} />
-                  <PaymentRow stage="方案确认款 · 40%" amount={11200} />
-                  <PaymentRow stage="施工图 + 软装尾款 · 30%" amount={8400} />
+                  {order.stages.map((s) => (
+                    <PaymentRow
+                      key={s.id}
+                      stage={`${s.name} · ${Math.round(s.ratio * 100)}%`}
+                      amount={s.amount}
+                    />
+                  ))}
                 </div>
               </Section>
 
               <Section title="四、资金托管与结算">
                 <p className="text-ink-80">
-                  甲方付款后,款项由平台托管。乙方阶段成果上传 + 甲方付费验收解锁后,
-                  款项进入 30 天验收期。验收期内甲方未提出异议,款项自动解冻并结算给乙方。
-                </p>
-              </Section>
-
-              <Section title="五、知识产权">
-                <p className="text-ink-80">
-                  本合同对应的设计成果知识产权,在甲方支付完所有款项后归甲方所有。
-                  乙方保留作品署名权与展示权。
-                </p>
-              </Section>
-
-              <Section title="六、违约与纠纷">
-                <p className="text-ink-80">
-                  合作过程中如出现履约争议,可在订单详情页申请「平台介入」。
-                  平台将根据沟通记录、阶段成果、付款记录等证据介入调解。
+                  甲方付款后，款项由平台托管。乙方上传阶段成果并经甲方付费验收解锁后，
+                  款项进入验收期。验收无异议后款项解冻并结算给乙方；全部阶段完成后双方确认最终服务完成。
                 </p>
               </Section>
 
@@ -116,32 +157,17 @@ export default function ContractPage({ params }: { params: { id: string } }) {
               <div className="grid gap-6 md:grid-cols-2">
                 <SignatureBlock
                   party="甲方(委托人)"
-                  name="林家三口"
+                  name={client?.name ?? "委托人"}
                   signed={signedByClient}
-                  onSign={() => {
-                    setSignedByClient(true);
-                    push({
-                      title: "签署成功",
-                      description: "你已通过实名认证完成签署。",
-                      variant: "success",
-                    });
-                  }}
                 />
                 <SignatureBlock
                   party="乙方(设计师)"
-                  name="陈牧之"
+                  name={designer?.name ?? "设计师"}
                   signed={signedByDesigner}
-                  onSign={() => {
-                    setSignedByDesigner(true);
-                    push({
-                      title: "已签署",
-                      variant: "success",
-                    });
-                  }}
                 />
               </div>
 
-              {allSigned && (
+              {allSigned ? (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
                   <div className="flex items-start gap-3">
                     <ShieldCheck className="mt-0.5 h-5 w-5 text-emerald-600" />
@@ -150,10 +176,21 @@ export default function ContractPage({ params }: { params: { id: string } }) {
                         合同已生效 · 永久存档
                       </div>
                       <div className="mt-1 text-xs text-emerald-700">
-                        合同将自动同步至双方账号「我的合同」,可随时查阅与下载。
+                        生效时间 ·{" "}
+                        {order.contractSignedAt
+                          ? formatDate(order.contractSignedAt)
+                          : "—"}
                       </div>
                     </div>
                   </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+                  尚未完成双方签署。请前往
+                  <Link href={orderHref} className="mx-1 font-medium underline">
+                    订单详情
+                  </Link>
+                  完成电子签约与预付款。
                 </div>
               )}
             </div>
@@ -177,19 +214,12 @@ export default function ContractPage({ params }: { params: { id: string } }) {
                   等待签署中
                 </Badge>
               )}
-              <div className="mt-3 text-xs text-ink-60">
-                生效时间 · {formatDate("2026-04-20")}
-              </div>
             </Card>
 
             <Card className="space-y-2 p-5 text-xs text-ink-60">
               <div className="flex items-start gap-2">
                 <Lock className="mt-0.5 h-3.5 w-3.5 text-ink-40" />
-                合同采用区块链存证,签署后不可篡改。
-              </div>
-              <div className="flex items-start gap-2">
-                <ShieldCheck className="mt-0.5 h-3.5 w-3.5 text-ink-40" />
-                由 e签宝提供电子签名服务(原型阶段为 mock)。
+                合同与订单状态同步存证，签署记录来自平台订单数据。
               </div>
             </Card>
           </aside>
@@ -230,12 +260,10 @@ function SignatureBlock({
   party,
   name,
   signed,
-  onSign,
 }: {
   party: string;
   name: string;
   signed: boolean;
-  onSign: () => void;
 }) {
   return (
     <div className="rounded-xl border border-ink-20 p-5">
@@ -246,9 +274,7 @@ function SignatureBlock({
           <CheckCircle2 className="h-3.5 w-3.5" /> 已电子签署
         </div>
       ) : (
-        <Button variant="brand" size="sm" className="mt-4" onClick={onSign}>
-          <Pen className="h-3.5 w-3.5" /> 立即签署
-        </Button>
+        <div className="mt-4 text-xs text-ink-40">待签署</div>
       )}
     </div>
   );

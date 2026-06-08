@@ -1,14 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSessionStore } from "@/store/session-store";
-import { getDesignerById } from "@/mocks/designers";
-import { getClientById } from "@/mocks/clients";
+import { useDesigners, useClients, useDisputes } from "@/lib/use-data";
+import {
+  acceptDisputeRequest,
+  resolveDisputeRequest,
+} from "@/lib/api-client";
+import type { Dispute } from "@/lib/types";
+import { useConsoleBasePath } from "@/components/layout/console-base-path";
 import {
   AlertCircle,
   CheckCircle2,
@@ -17,96 +23,81 @@ import {
   MessageCircle,
   Scale,
   Shield,
-  XCircle,
 } from "lucide-react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
-interface Dispute {
-  id: string;
-  orderCode: string;
-  title: string;
-  clientId: string;
-  designerId: string;
-  amount: number;
-  raisedBy: "client" | "designer";
-  type: string;
-  description: string;
-  raisedAt: string;
-  status: "open" | "in_review" | "resolved";
-  evidence: { name: string }[];
-}
-
-const DISPUTES: Dispute[] = [
-  {
-    id: "dp_1",
-    orderCode: "LZ20260415-003",
-    title: "厦门鼓浪屿民宿 · 概念方案",
-    clientId: "client_yu",
-    designerId: "designer_tang",
-    amount: 7200,
-    raisedBy: "client",
-    type: "成果质量异议",
-    description:
-      "二次返修后茶室体量虽已减小,但庭院仍显局促,与最初讨论的方案精神不符,希望平台介入评估。",
-    raisedAt: "2026-04-30T09:30:00+08:00",
-    status: "in_review",
-    evidence: [
-      { name: "原方案截图.jpg" },
-      { name: "返修后截图.jpg" },
-      { name: "微信沟通记录.pdf" },
-    ],
-  },
-  {
-    id: "dp_2",
-    orderCode: "LZ20260328-008",
-    title: "深圳办公空间 · 软装陈设",
-    clientId: "client_qing",
-    designerId: "designer_zhou",
-    amount: 12000,
-    raisedBy: "designer",
-    type: "付款延迟",
-    description:
-      "成果上传 15 天,委托人未付款也未提出任何反馈,希望平台介入催款。",
-    raisedAt: "2026-04-22T11:00:00+08:00",
-    status: "open",
-    evidence: [{ name: "成果交付确认邮件.eml" }],
-  },
-  {
-    id: "dp_3",
-    orderCode: "LZ20260120-002",
-    title: "杭州滨江酒店改造",
-    clientId: "client_lin",
-    designerId: "designer_li",
-    amount: 16000,
-    raisedBy: "client",
-    type: "返修响应慢",
-    description: "提交返修需求 7 天未响应。",
-    raisedAt: "2026-02-10T10:00:00+08:00",
-    status: "resolved",
-    evidence: [],
-  },
-];
-
 export default function AdminDisputesPage() {
+  const base = useConsoleBasePath();
   const push = useSessionStore((s) => s.pushNotification);
+  const { data: disputes, loading, refresh } = useDisputes();
+  const { data: designers } = useDesigners();
+  const { data: clients } = useClients();
+  const getDesignerById = (id: string) => designers.find((d) => d.id === id);
+  const getClientById = (id: string) => clients.find((c) => c.id === id);
   const [activeTab, setActiveTab] = useState<"open" | "in_review" | "resolved">(
     "open",
   );
-  const counts = {
-    open: DISPUTES.filter((d) => d.status === "open").length,
-    in_review: DISPUTES.filter((d) => d.status === "in_review").length,
-    resolved: DISPUTES.filter((d) => d.status === "resolved").length,
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const counts = useMemo(
+    () => ({
+      open: disputes.filter((d) => d.status === "open").length,
+      in_review: disputes.filter((d) => d.status === "in_review").length,
+      resolved: disputes.filter((d) => d.status === "resolved").length,
+    }),
+    [disputes],
+  );
+
+  const filtered = disputes.filter((d) => d.status === activeTab);
+
+  const run = async (id: string, fn: () => Promise<unknown>, success: string) => {
+    setBusyId(id);
+    try {
+      await fn();
+      push({ title: success, variant: "success" });
+      refresh();
+    } catch (e) {
+      push({
+        title: "操作失败",
+        description: e instanceof Error ? e.message : "请稍后再试",
+        variant: "destructive",
+      });
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  const filtered = DISPUTES.filter((d) => d.status === activeTab);
+  const handleAccept = (d: Dispute) =>
+    run(d.id, () => acceptDisputeRequest(d.id), "已受理，进入处理中");
 
-  const handleResolve = (which: "client" | "designer", d: Dispute) => {
-    push({
-      title: which === "client" ? "已支持委托人 · 退还托管资金" : "已支持设计师 · 解冻款项",
-      description: `订单 ${d.orderCode} · ${formatCurrency(d.amount)} 已处理。`,
-      variant: "success",
-    });
+  const handleResolve = (d: Dispute, resolution: "client" | "designer") =>
+    run(
+      d.id,
+      () => resolveDisputeRequest(d.id, { resolution }),
+      resolution === "client"
+        ? `已支持委托人 · 订单 ${d.orderCode}`
+        : `已支持设计师 · 订单 ${d.orderCode}`,
+    );
+
+  const handleSplit = (d: Dispute) => {
+    const pct = Number(
+      window.prompt("请输入委托人承担比例（0–100）", "60") ?? "",
+    );
+    if (Number.isNaN(pct) || pct < 0 || pct > 100) return;
+    run(
+      d.id,
+      () =>
+        resolveDisputeRequest(d.id, {
+          resolution: "split",
+          clientSharePercent: pct,
+        }),
+      `部分裁决完成 · 委托人 ${pct}%`,
+    );
   };
+
+  if (loading) {
+    return <div className="py-20 text-center text-ink-60">加载纠纷列表...</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -115,7 +106,7 @@ export default function AdminDisputesPage() {
           纠纷处理
         </h2>
         <p className="mt-1 text-sm text-ink-60">
-          针对设计师与委托人的服务争议,平台依据沟通记录、阶段成果、付款记录介入裁决。
+          针对设计师与委托人的服务争议，平台依据沟通记录、阶段成果、付款记录介入裁决。
         </p>
       </div>
 
@@ -125,7 +116,7 @@ export default function AdminDisputesPage() {
         <StatCard label="已解决" value={counts.resolved} icon={CheckCircle2} tone="emerald" />
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
         <TabsList>
           <TabsTrigger value="open" className="gap-2">
             待受理 <Badge variant="rose">{counts.open}</Badge>
@@ -148,6 +139,7 @@ export default function AdminDisputesPage() {
               filtered.map((d) => {
                 const client = getClientById(d.clientId);
                 const designer = getDesignerById(d.designerId);
+                const busy = busyId === d.id;
                 return (
                   <Card key={d.id} className="p-6">
                     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -155,20 +147,33 @@ export default function AdminDisputesPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="rose">{d.type}</Badge>
                           <Badge variant="outline">
-                            发起方:{d.raisedBy === "client" ? "委托人" : "设计师"}
+                            发起方:
+                            {d.raisedBy === "client" ? "委托人" : "设计师"}
                           </Badge>
-                          <span className="text-xs text-ink-40">{d.orderCode}</span>
+                          <Link
+                            href={`${base}/orders/${d.orderId}`}
+                            className="text-xs text-brand hover:underline"
+                          >
+                            {d.orderCode}
+                          </Link>
                         </div>
                         <h3 className="text-base font-semibold text-ink">
                           {d.title}
                         </h3>
                         <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-ink-60">
-                          <span>涉及金额 <strong className="text-ink">{formatCurrency(d.amount)}</strong></span>
+                          <span>
+                            涉及金额{" "}
+                            <strong className="text-ink">
+                              {formatCurrency(d.amount)}
+                            </strong>
+                          </span>
                           <span>发起 {formatDateTime(d.raisedAt)}</span>
                         </div>
                       </div>
-                      <Button variant="outline" size="sm">
-                        <MessageCircle className="h-3.5 w-3.5" /> 三方沟通
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={`${base}/orders/${d.orderId}`}>
+                          <MessageCircle className="h-3.5 w-3.5" /> 查看订单
+                        </Link>
                       </Button>
                     </div>
 
@@ -210,7 +215,21 @@ export default function AdminDisputesPage() {
                           avatar={designer?.avatar ?? ""}
                         />
 
-                        {d.status !== "resolved" && (
+                        {d.status === "open" && (
+                          <div className="border-t border-ink-20 pt-3">
+                            <Button
+                              variant="brand"
+                              size="sm"
+                              className="w-full"
+                              disabled={busy}
+                              onClick={() => handleAccept(d)}
+                            >
+                              受理工单
+                            </Button>
+                          </div>
+                        )}
+
+                        {d.status === "in_review" && (
                           <div className="space-y-2 border-t border-ink-20 pt-3">
                             <div className="text-xs font-medium uppercase tracking-wider text-ink-40">
                               裁决操作
@@ -219,7 +238,8 @@ export default function AdminDisputesPage() {
                               variant="brand"
                               size="sm"
                               className="w-full"
-                              onClick={() => handleResolve("client", d)}
+                              disabled={busy}
+                              onClick={() => handleResolve(d, "client")}
                             >
                               <Shield className="h-3.5 w-3.5" /> 支持委托人 · 退款
                             </Button>
@@ -227,7 +247,8 @@ export default function AdminDisputesPage() {
                               variant="outline"
                               size="sm"
                               className="w-full"
-                              onClick={() => handleResolve("designer", d)}
+                              disabled={busy}
+                              onClick={() => handleResolve(d, "designer")}
                             >
                               <Coins className="h-3.5 w-3.5" /> 支持设计师 · 解冻
                             </Button>
@@ -235,6 +256,8 @@ export default function AdminDisputesPage() {
                               variant="ghost"
                               size="sm"
                               className="w-full text-ink-60"
+                              disabled={busy}
+                              onClick={() => handleSplit(d)}
                             >
                               <Scale className="h-3.5 w-3.5" /> 部分裁决 · 各承担
                             </Button>
@@ -244,7 +267,15 @@ export default function AdminDisputesPage() {
                         {d.status === "resolved" && (
                           <div className="rounded-lg bg-emerald-100 px-3 py-2 text-xs text-emerald-800">
                             <CheckCircle2 className="mr-1 inline h-3 w-3" />
-                            已结案 · 部分裁决:委托人承担 60%
+                            已结案
+                            {d.resolution === "split" && d.clientSharePercent != null
+                              ? ` · 委托人承担 ${d.clientSharePercent}%`
+                              : d.resolution === "client"
+                                ? " · 支持委托人"
+                                : d.resolution === "designer"
+                                  ? " · 支持设计师"
+                                  : ""}
+                            {d.resolutionNote ? ` — ${d.resolutionNote}` : ""}
                           </div>
                         )}
                       </div>

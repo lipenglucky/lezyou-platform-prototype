@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { getDesignerById } from "@/mocks/designers";
+import { useDesigner } from "@/lib/use-data";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,11 +33,33 @@ import {
   Wifi,
 } from "lucide-react";
 import { SUB_SPECIALTIES, getProjectTypes } from "@/lib/constants";
+import { getDesignerV11TimeRates } from "@/lib/designer-rates";
 import { formatCurrency } from "@/lib/utils";
-import type { BillingMode, ServiceMode } from "@/lib/types";
+import type { DesignerLevel, HalfDaySlot, ServiceMode } from "@/lib/types";
+
+type DirectedBillingMode = "daily" | "monthly";
 import { useSessionStore } from "@/store/session-store";
 import { useRoleStore } from "@/store/role-store";
+import { createOrderRequest } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { DesignerName } from "@/components/domain/designer-name";
+import {
+  DesignerLevelBadge,
+  DesignerLevelCoefficientBadge,
+} from "@/components/domain/level-badges";
+import { DesignerSchedulePicker } from "@/components/domain/designer-schedule-picker";
+import { DesignerMonthPicker } from "@/components/domain/designer-month-picker";
+import {
+  formatSelectedSlotsSummary,
+  formatSelectedMonthsSummary,
+  halfDaysToWorkDays,
+  slotsToDateRange,
+  type MonthKey,
+} from "@/lib/designer-schedule";
+import {
+  MONTHLY_BILLING_RULE,
+  buildMonthlyStages,
+} from "@/lib/monthly-billing";
 
 export default function NewOrderPage() {
   return (
@@ -57,22 +79,35 @@ function NewOrderInner() {
   const [serviceMode, setServiceMode] = useState<ServiceMode>(
     initialMode || "online",
   );
-  const [billingMode, setBillingMode] = useState<BillingMode>("daily");
-  const [days, setDays] = useState(10);
-  const [months, setMonths] = useState(1);
-  const [scheduleFrom, setScheduleFrom] = useState("");
-  const [scheduleTo, setScheduleTo] = useState("");
+  const [billingMode, setBillingMode] = useState<DirectedBillingMode>("daily");
+  const [selectedSlots, setSelectedSlots] = useState<HalfDaySlot[]>([]);
+  const [selectedMonths, setSelectedMonths] = useState<MonthKey[]>([]);
   const [address, setAddress] = useState("");
   const [subSpecialty, setSubSpecialty] = useState("");
   const [projectType, setProjectType] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [withAudit, setWithAudit] = useState(false);
+  const [withPM, setWithPM] = useState(false);
 
-  const designer = designerId ? getDesignerById(designerId) : undefined;
+  const { data: designer } = useDesigner(designerId);
   const push = useSessionStore((s) => s.pushNotification);
-  const appendDraftOrder = useSessionStore((s) => s.appendDraftOrder);
   const setRole = useRoleStore((s) => s.setRole);
   const role = useRoleStore((s) => s.role);
+  const identityId = useRoleStore((s) => s.identityId);
+
+  const workDays = halfDaysToWorkDays(selectedSlots);
+  const months = selectedMonths.length;
+  const dateRange = slotsToDateRange(selectedSlots);
+
+  const handleBillingModeChange = (mode: DirectedBillingMode) => {
+    setBillingMode(mode);
+    if (mode === "daily") setSelectedMonths([]);
+    else setSelectedSlots([]);
+  };
+
+  const hasScheduleSelection =
+    billingMode === "daily" ? selectedSlots.length >= 1 : selectedMonths.length >= 1;
 
   useEffect(() => {
     if (role === "guest") {
@@ -83,38 +118,88 @@ function NewOrderInner() {
   const projectTypes = designer ? getProjectTypes(designer.specialty) : [];
   const subSpecialties = designer ? SUB_SPECIALTIES[designer.specialty] : [];
 
+  const v11Rates = useMemo(() => {
+    if (!designer) return null;
+    const level: DesignerLevel = designer.level ?? "mid_v1";
+    return getDesignerV11TimeRates({ ...designer, level });
+  }, [designer]);
+
+  const unitDaily =
+    serviceMode === "online" ? v11Rates?.remote.daily ?? 0 : v11Rates?.onsite.daily ?? 0;
+  const unitMonthly =
+    serviceMode === "online" ? v11Rates?.remote.monthly ?? 0 : v11Rates?.onsite.monthly ?? 0;
+
   const totalAmount = useMemo(() => {
-    if (!designer) return 0;
-    return billingMode === "daily"
-      ? designer.dailyRate * days
-      : designer.monthlyRate * months;
-  }, [billingMode, days, months, designer]);
+    if (!designer || !v11Rates) return 0;
+    if (billingMode === "monthly") return unitMonthly * Math.max(months, 0);
+    return unitDaily * Math.max(workDays, 0);
+  }, [billingMode, workDays, months, designer, unitDaily, unitMonthly, v11Rates]);
+
+  const monthlyPreviewStages = useMemo(
+    () =>
+      billingMode === "monthly" && selectedMonths.length > 0
+        ? buildMonthlyStages("preview", totalAmount, selectedMonths)
+        : [],
+    [billingMode, selectedMonths, totalAmount],
+  );
 
   const platformFee = Math.round(totalAmount * 0.08);
+  const auditFee = withAudit ? Math.round(totalAmount * 0.08) : 0;
+  const pmFee = withPM ? Math.round(totalAmount * 0.2) : 0;
+  const grandTotal = totalAmount + auditFee + pmFee;
   const designerNet = totalAmount - platformFee;
 
-  const handleConfirm = () => {
-    if (!designer) return;
-    const id = appendDraftOrder(designer.id, {
-      title,
-      serviceMode,
-      billingMode,
-      days,
-      months,
-      totalAmount,
-      subSpecialty,
-      projectType,
-      description,
-      scheduleFrom,
-      scheduleTo,
-      address,
-    });
-    push({
-      title: "下单成功 · 资金已托管",
-      description: `订单号 ${id},电子合同已生成。可在「我的订单」查看进度。`,
-      variant: "success",
-    });
-    router.push("/client/orders?new=1");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleConfirm = async () => {
+    if (!designer || !hasScheduleSelection || submitting) return;
+    setSubmitting(true);
+    try {
+      // 优先写入数据库（已登录的委托人）
+      const order = await createOrderRequest({
+        designerId: designer.id,
+        title,
+        specialty: designer.specialty,
+        subSpecialty: subSpecialty || undefined,
+        projectType,
+        serviceMode,
+        billingMode,
+        orderSource: "directed",
+        totalAmount,
+        description,
+        selectedSlots: billingMode === "daily" ? selectedSlots : [],
+        selectedMonths: billingMode === "monthly" ? selectedMonths : undefined,
+        address: serviceMode === "onsite" ? address : undefined,
+        scheduleFrom: dateRange?.from,
+        scheduleTo: dateRange?.to,
+        withAuditService: withAudit,
+        withProjectManagement: withPM,
+      });
+      push({
+        title: "下单成功",
+        description: `订单号 ${order.code}，已发送给 ${designer.name} 确认档期。`,
+        variant: "success",
+      });
+      router.push("/client/orders");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "请稍后再试";
+      if (msg.includes("401") || msg.includes("登录") || role === "guest") {
+        push({
+          title: "请先登录",
+          description: "定向下单需使用委托人账号登录。",
+          variant: "destructive",
+        });
+        router.push(`/login?redirect=/order/new?designerId=${designer.id}`);
+        return;
+      }
+      push({
+        title: "下单失败",
+        description: msg,
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (!designerId || !designer) {
@@ -133,13 +218,18 @@ function NewOrderInner() {
     );
   }
 
+  const designerLevel: DesignerLevel = designer.level ?? "mid_v1";
+
   const STEPS = [
     { id: "service", label: "服务类型" },
     { id: "scope", label: "项目内容" },
     { id: "payment", label: "确认 · 支付" },
   ];
 
-  const canNextStep0 = serviceMode !== undefined;
+  const canNextStep0 =
+    serviceMode !== undefined &&
+    hasScheduleSelection &&
+    (serviceMode !== "onsite" || address.trim().length > 2);
   const canNextStep1 =
     title.trim().length > 1 && projectType && subSpecialty && description.length > 4;
 
@@ -209,77 +299,67 @@ function NewOrderInner() {
               <div className="grid gap-4 md:grid-cols-2">
                 <ChoiceCard
                   active={billingMode === "daily"}
-                  onClick={() => setBillingMode("daily")}
+                  onClick={() => handleBillingModeChange("daily")}
                   icon={CircleDollarSign}
-                  title={`按天计费 · ${formatCurrency(designer.dailyRate)} / 天`}
-                  description="按工日核算总费用,适合短中期项目。"
+                  title={`按天计费 · ${formatCurrency(unitDaily)} / 天`}
+                  description={
+                    selectedSlots.length > 0
+                      ? `已选 ${workDays} 工日 · 小计 ${formatCurrency(unitDaily * workDays)}`
+                      : `v1.1 单价（${serviceMode === "online" ? "线上远程" : "线下驻场"} · ${v11Rates?.trackLabel ?? ""}）× 等级 × 地区`
+                  }
                 />
                 <ChoiceCard
                   active={billingMode === "monthly"}
-                  onClick={() => setBillingMode("monthly")}
+                  onClick={() => handleBillingModeChange("monthly")}
                   icon={CalendarRange}
-                  title={`按月雇佣 · ${formatCurrency(designer.monthlyRate)} / 月`}
-                  description="首月预付,每月 20 号确认续约。"
+                  title={`按月雇佣 · ${formatCurrency(unitMonthly)} / 月`}
+                  description={
+                    selectedMonths.length > 0
+                      ? `已选 ${months} 个月 · 小计 ${formatCurrency(unitMonthly * months)}`
+                      : "首月预付，每月 25 号前支付下月服务费。"
+                  }
                 />
               </div>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                {billingMode === "daily" ? (
-                  <div>
-                    <Label>预计工日</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={days}
-                      onChange={(e) => setDays(Number(e.target.value || 1))}
-                      className="mt-2"
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <Label>首期雇佣月数</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={months}
-                      onChange={(e) => setMonths(Number(e.target.value || 1))}
-                      className="mt-2"
-                    />
-                  </div>
-                )}
+              <Separator className="my-7" />
 
-                {serviceMode === "onsite" && (
-                  <>
-                    <div>
-                      <Label>上门起止 · 起</Label>
-                      <Input
-                        type="date"
-                        value={scheduleFrom}
-                        onChange={(e) => setScheduleFrom(e.target.value)}
-                        className="mt-2"
-                      />
-                    </div>
-                    <div>
-                      <Label>上门起止 · 止</Label>
-                      <Input
-                        type="date"
-                        value={scheduleTo}
-                        onChange={(e) => setScheduleTo(e.target.value)}
-                        className="mt-2"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <Label>项目地址</Label>
-                      <Input
-                        placeholder="精确到门牌号"
-                        value={address}
-                        onChange={(e) => setAddress(e.target.value)}
-                        className="mt-2"
-                      />
-                    </div>
-                  </>
+              <div>
+                <div className="mb-4">
+                  <Label className="text-base font-semibold text-ink">
+                    {billingMode === "daily" ? "选择服务档期（按半天）" : "选择雇佣月份"}
+                  </Label>
+                  <p className="mt-1 text-xs text-ink-60">
+                    {billingMode === "daily"
+                      ? "在设计师空闲档期内点选上午/下午，可连续或跳跃多选，最少半天。提交后发送给设计师确认。"
+                      : "点选要雇佣的月份，可连续或跳跃多选，至少 1 个月。提交后发送给设计师确认。"}
+                  </p>
+                </div>
+                {billingMode === "daily" ? (
+                  <DesignerSchedulePicker
+                    calendar={designer.calendar}
+                    value={selectedSlots}
+                    onChange={setSelectedSlots}
+                  />
+                ) : (
+                  <DesignerMonthPicker
+                    calendar={designer.calendar}
+                    value={selectedMonths}
+                    onChange={setSelectedMonths}
+                  />
                 )}
               </div>
+
+              {serviceMode === "onsite" && (
+                <div className="mt-6">
+                  <Label>项目地址</Label>
+                  <Input
+                    placeholder="精确到门牌号"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    className="mt-2"
+                  />
+                </div>
+              )}
 
               <div className="mt-7 flex items-center justify-end gap-2">
                 <Button
@@ -352,6 +432,60 @@ function NewOrderInner() {
                     className="mt-2"
                   />
                 </div>
+
+                <div>
+                  <Label>v1.1 增值服务（可选加购）</Label>
+                  <div className="mt-2 grid gap-3 md:grid-cols-2">
+                    <label
+                      className={cn(
+                        "flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors",
+                        withAudit
+                          ? "border-amber-400 bg-amber-50"
+                          : "border-ink-20 hover:border-amber-300",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={withAudit}
+                        onChange={(e) => setWithAudit(e.target.checked)}
+                        className="mt-1 h-4 w-4"
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="amber">第三方审图</Badge>
+                          <span className="text-xs text-ink-60">+8% 设计费</span>
+                        </div>
+                        <p className="mt-1.5 text-xs text-ink-60">
+                          独立审图师审核图纸并出具审图文档，对设计师专业水平五档评级。
+                        </p>
+                      </div>
+                    </label>
+                    <label
+                      className={cn(
+                        "flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors",
+                        withPM
+                          ? "border-violet-400 bg-violet-50"
+                          : "border-ink-20 hover:border-violet-300",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={withPM}
+                        onChange={(e) => setWithPM(e.target.checked)}
+                        className="mt-1 h-4 w-4"
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="violet">项目管理</Badge>
+                          <span className="text-xs text-ink-60">+20% 设计费</span>
+                        </div>
+                        <p className="mt-1.5 text-xs text-ink-60">
+                          项目经理对外沟通、对内协调各专业，出具会议纪要并把控进度。
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-7 flex items-center justify-end gap-2">
@@ -377,20 +511,40 @@ function NewOrderInner() {
               <div className="mt-6 space-y-4">
                 <div className="rounded-2xl border border-ink-20 bg-ink-20/20 p-5">
                   <div className="text-xs font-medium uppercase tracking-wider text-ink-40">
-                    分阶段付款方案 · 默认 30 / 40 / 30
+                    {billingMode === "monthly"
+                      ? "按月雇佣付款方案"
+                      : "分阶段付款方案 · 默认 30 / 40 / 30"}
                   </div>
                   <div className="mt-3 grid gap-2 text-sm">
-                    <StageRow label="预付款" ratio={0.3} amount={totalAmount} />
-                    <StageRow
-                      label="中期款 · 阶段成果上传后支付"
-                      ratio={0.4}
-                      amount={totalAmount}
-                    />
-                    <StageRow label="尾款 · 终稿验收后支付" ratio={0.3} amount={totalAmount} />
+                    {billingMode === "monthly"
+                      ? monthlyPreviewStages.map((stage) => (
+                          <MonthlyStageRow
+                            key={stage.id}
+                            label={stage.name}
+                            amount={stage.amount}
+                          />
+                        ))
+                      : (
+                        <>
+                          <StageRow label="预付款" ratio={0.3} amount={totalAmount} />
+                          <StageRow
+                            label="中期款 · 阶段成果上传后支付"
+                            ratio={0.4}
+                            amount={totalAmount}
+                          />
+                          <StageRow
+                            label="尾款 · 终稿验收后支付"
+                            ratio={0.3}
+                            amount={totalAmount}
+                          />
+                        </>
+                      )}
                   </div>
                   <div className="mt-3 flex items-start gap-2 text-xs text-ink-60">
                     <TimerReset className="mt-0.5 h-3.5 w-3.5" />
-                    每笔款项支付后进入平台 30 天托管,验收无误自动解冻给设计师。
+                    {billingMode === "monthly"
+                      ? MONTHLY_BILLING_RULE
+                      : "每笔款项支付后进入平台 30 天托管,验收无误自动解冻给设计师。"}
                   </div>
                 </div>
 
@@ -402,7 +556,7 @@ function NewOrderInner() {
                         电子合同将自动生成
                       </div>
                       <div className="mt-1 text-xs text-ink-60">
-                        合同将记录设计师服务范围、交付清单、付款节点、知识产权归属、纠纷解决等条款。永久存档可在订单详情查阅。
+                        档期确认后自动生成合同，记录服务范围、交付清单、付款节点等条款。永久存档可在订单详情查阅。
                       </div>
                     </div>
                   </div>
@@ -429,8 +583,14 @@ function NewOrderInner() {
                 <Button variant="ghost" onClick={() => setStep(1)}>
                   <ArrowLeft className="h-4 w-4" /> 上一步
                 </Button>
-                <Button variant="brand" onClick={handleConfirm}>
-                  立即支付预付款 {formatCurrency(Math.round(totalAmount * 0.3))}
+                <Button
+                  variant="brand"
+                  onClick={handleConfirm}
+                  disabled={!hasScheduleSelection || submitting}
+                >
+                  {submitting
+                    ? "提交中..."
+                    : `发送档期申请并支付预付款 ${formatCurrency(Math.round(totalAmount * 0.3))}`}
                 </Button>
               </div>
             </Card>
@@ -446,11 +606,13 @@ function NewOrderInner() {
               </Avatar>
               <div className="min-w-0 flex-1">
                 <div className="text-base font-semibold text-ink">
-                  {designer.name}
+                  <DesignerName designer={designer} />
                 </div>
-                <div className="truncate text-xs text-ink-60">
-                  {designer.tagline}
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <DesignerLevelBadge level={designerLevel} />
+                  <DesignerLevelCoefficientBadge level={designerLevel} />
                 </div>
+                <div className="truncate text-xs text-ink-60">{designer.tagline}</div>
               </div>
             </div>
             <Separator />
@@ -458,16 +620,70 @@ function NewOrderInner() {
               <Row label="服务模式" value={serviceMode === "online" ? "纯线上" : "线下上门"} />
               <Row label="计费模式" value={billingMode === "daily" ? "按天计费" : "按月雇佣"} />
               <Row
+                label={billingMode === "daily" ? "服务档期" : "雇佣月份"}
+                value={
+                  billingMode === "daily"
+                    ? selectedSlots.length > 0
+                      ? formatSelectedSlotsSummary(selectedSlots)
+                      : "未选择"
+                    : selectedMonths.length > 0
+                      ? formatSelectedMonthsSummary(selectedMonths)
+                      : "未选择"
+                }
+              />
+              <Row
                 label={billingMode === "daily" ? "工日" : "雇佣月数"}
-                value={billingMode === "daily" ? `${days} 天` : `${months} 个月`}
+                value={
+                  billingMode === "daily"
+                    ? `${workDays} 天`
+                    : `${months} 个月`
+                }
+              />
+              <Row
+                label="v1.1 单价（当前模式）"
+                value={
+                  billingMode === "daily"
+                    ? `${formatCurrency(unitDaily)} / 天`
+                    : `${formatCurrency(unitMonthly)} / 月`
+                }
+              />
+              <Row
+                label="线上 / 线下（日）"
+                value={`${formatCurrency(v11Rates?.remote.daily ?? 0)} / ${formatCurrency(v11Rates?.onsite.daily ?? 0)}`}
+              />
+              <Row
+                label="线上 / 线下（月）"
+                value={`${formatCurrency(v11Rates?.remote.monthly ?? 0)} / ${formatCurrency(v11Rates?.onsite.monthly ?? 0)}`}
               />
               <Separator />
               <Row label="设计费小计" value={formatCurrency(totalAmount)} />
+              {withAudit ? (
+                <Row
+                  label="第三方审图 (+8%)"
+                  value={`+${formatCurrency(auditFee)}`}
+                  tone="amber"
+                />
+              ) : null}
+              {withPM ? (
+                <Row
+                  label="项目管理 (+20%)"
+                  value={`+${formatCurrency(pmFee)}`}
+                  tone="violet"
+                />
+              ) : null}
               <Row
                 label="平台手续费 (8%)"
                 value={`-${formatCurrency(platformFee)}`}
                 tone="rose"
               />
+              {withAudit || withPM ? (
+                <div className="flex items-end justify-between border-t border-ink-20 pt-3">
+                  <span className="text-xs text-ink-60">含增值服务合计</span>
+                  <span className="text-base font-semibold text-ink">
+                    {formatCurrency(grandTotal)}
+                  </span>
+                </div>
+              ) : null}
               <div className="flex items-end justify-between border-t border-ink-20 pt-3">
                 <span className="text-xs text-ink-60">设计师实际到账</span>
                 <span className="text-base font-semibold text-emerald-700">
@@ -480,7 +696,7 @@ function NewOrderInner() {
           <Card className="space-y-3 p-6 text-xs text-ink-60">
             <div className="flex items-start gap-2">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 text-brand" />
-              本订单生成后将自动签署电子合同,合同永久存档。
+              档期发送后需设计师确认，确认后自动生成电子合同并永久存档。
             </div>
             <div className="flex items-start gap-2">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 text-brand" />
@@ -559,6 +775,23 @@ function StageRow({
   );
 }
 
+function MonthlyStageRow({
+  label,
+  amount,
+}: {
+  label: string;
+  amount: number;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-ink-20 bg-white p-3">
+      <div className="text-sm font-medium text-ink">{label}</div>
+      <div className="text-base font-semibold tracking-tight text-ink">
+        {formatCurrency(amount)}
+      </div>
+    </div>
+  );
+}
+
 function Row({
   label,
   value,
@@ -566,14 +799,20 @@ function Row({
 }: {
   label: string;
   value: string;
-  tone?: "default" | "rose";
+  tone?: "default" | "rose" | "amber" | "violet";
 }) {
+  const toneCls =
+    tone === "rose"
+      ? "text-rose-600"
+      : tone === "amber"
+        ? "text-amber-700"
+        : tone === "violet"
+          ? "text-violet-700"
+          : "text-ink";
   return (
     <div className="flex items-center justify-between">
       <span className="text-ink-60">{label}</span>
-      <span className={tone === "rose" ? "text-rose-600" : "text-ink"}>
-        {value}
-      </span>
+      <span className={toneCls}>{value}</span>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { designerWallet, designerTransactions } from "@/mocks/wallet";
+import { ProjectIdCopy } from "@/components/domain/project-id-copy";
+import { useOrders, useWallet } from "@/lib/use-data";
+import { isProjectId } from "@/lib/project-id";
+import type { Order, WalletTransaction } from "@/lib/types";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import {
   ArrowDownToLine,
@@ -28,22 +32,25 @@ import {
   Coins,
 } from "lucide-react";
 import { useSessionStore } from "@/store/session-store";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  CartesianGrid,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 export default function DesignerWalletPage() {
   const push = useSessionStore((s) => s.pushNotification);
+  const { data: wallet } = useWallet();
+  const { data: orders } = useOrders();
+  const designerWallet = wallet.summary;
+  const designerTransactions = wallet.transactions;
+
+  const orderByCode = useMemo(() => {
+    const map = new Map<string, Order>();
+    for (const order of orders) map.set(order.code, order);
+    return map;
+  }, [orders]);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState(
-    designerWallet.available,
-  );
+  const [withdrawAmount, setWithdrawAmount] = useState(0);
+
+  useEffect(() => {
+    setWithdrawAmount(designerWallet.available);
+  }, [designerWallet.available]);
 
   const handleWithdraw = () => {
     push({
@@ -56,16 +63,24 @@ export default function DesignerWalletPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight text-ink">
-          钱包 · 提现
-        </h2>
-        <p className="mt-1 text-sm text-ink-60">
-          所有项目款项进入 30 天托管期,验收无误后自动解冻可提现。
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight text-ink">
+            钱包 · 提现
+          </h2>
+          <p className="mt-1 text-sm text-ink-60">
+            所有项目款项进入 30 天托管期,验收无误后自动解冻可提现。
+          </p>
+        </div>
+        <Button variant="outline" className="gap-2" asChild>
+          <Link href="/designer/wallet/stats">
+            <TrendingUp className="h-4 w-4" />
+            收入统计
+          </Link>
+        </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card className="p-5">
           <div className="flex items-center justify-between">
             <span className="text-xs uppercase tracking-wider text-ink-40">
@@ -158,74 +173,7 @@ export default function DesignerWalletPage() {
           </div>
         </Card>
 
-        <Card className="p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wider text-ink-40">
-              已扣手续费(8%)
-            </span>
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-ink-20/50">
-              <Receipt className="h-4 w-4 text-ink-60" />
-            </div>
-          </div>
-          <div className="mt-3 text-3xl font-bold tracking-tight text-ink">
-            {formatCurrency(designerWallet.feeAccumulated)}
-          </div>
-        </Card>
       </div>
-
-      <Card className="p-6">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold tracking-tight text-ink">
-              收入趋势
-            </h3>
-            <p className="mt-1 text-xs text-ink-60">近 6 个月入账与提现</p>
-          </div>
-          <Badge variant="muted">
-            <TrendingUp className="h-3 w-3" /> 同比 +28%
-          </Badge>
-        </div>
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={designerWallet.monthlyTrend}>
-              <defs>
-                <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#0a0a0a" stopOpacity={0.4} />
-                  <stop offset="100%" stopColor="#0a0a0a" stopOpacity={0.02} />
-                </linearGradient>
-                <linearGradient id="withdrawGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#E11D48" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#E11D48" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="#E5E5E5" strokeDasharray="3 3" />
-              <XAxis dataKey="month" stroke="#A3A3A3" fontSize={11} />
-              <YAxis stroke="#A3A3A3" fontSize={11} />
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 12,
-                  border: "1px solid #E5E5E5",
-                  fontSize: 12,
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="income"
-                stroke="#0a0a0a"
-                fill="url(#incomeGrad)"
-                name="入账"
-              />
-              <Area
-                type="monotone"
-                dataKey="withdraw"
-                stroke="#E11D48"
-                fill="url(#withdrawGrad)"
-                name="提现"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
 
       <Card className="p-6">
         <div className="mb-4 flex items-center justify-between">
@@ -247,14 +195,15 @@ export default function DesignerWalletPage() {
                   : t.type === "fee"
                     ? Receipt
                     : ShieldCheck;
+            const orderInfo = resolveDesignerOrderInfo(t, orderByCode);
             return (
               <div
                 key={t.id}
                 className="flex items-center justify-between rounded-xl border border-ink-20 p-4"
               >
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
                   <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
                       t.status === "frozen"
                         ? "bg-violet-100 text-violet-600"
                         : t.type === "withdraw"
@@ -266,10 +215,28 @@ export default function DesignerWalletPage() {
                   >
                     <TypeIcon className="h-4 w-4" />
                   </div>
-                  <div>
+                  <div className="min-w-0 space-y-1">
                     <div className="text-sm font-medium text-ink">{t.note}</div>
+                    {orderInfo.href && (orderInfo.orderTitle || orderInfo.orderCode) ? (
+                      <Link
+                        href={orderInfo.href}
+                        className="group block min-w-0 rounded-md transition-colors hover:bg-ink-20/30"
+                      >
+                        {orderInfo.orderTitle ? (
+                          <div className="truncate text-sm font-medium text-ink group-hover:text-brand">
+                            {orderInfo.orderTitle}
+                          </div>
+                        ) : null}
+                        {orderInfo.orderCode && isProjectId(orderInfo.orderCode) ? (
+                          <ProjectIdCopy code={orderInfo.orderCode} compact />
+                        ) : orderInfo.orderCode ? (
+                          <span className="text-xs text-ink-60">
+                            订单 {orderInfo.orderCode}
+                          </span>
+                        ) : null}
+                      </Link>
+                    ) : null}
                     <div className="text-xs text-ink-60">
-                      {t.orderCode ? `订单 ${t.orderCode} · ` : ""}
                       {formatDateTime(t.occurredAt)}
                     </div>
                   </div>
@@ -306,4 +273,18 @@ export default function DesignerWalletPage() {
       </Card>
     </div>
   );
+}
+
+function resolveDesignerOrderInfo(
+  transaction: WalletTransaction,
+  orderByCode: Map<string, Order>,
+) {
+  const matched = transaction.orderCode
+    ? orderByCode.get(transaction.orderCode)
+    : undefined;
+  const orderId = transaction.orderId ?? matched?.id;
+  const orderTitle = transaction.orderTitle ?? matched?.title;
+  const orderCode = transaction.orderCode ?? matched?.code;
+  const href = orderId ? `/designer/orders/${orderId}` : undefined;
+  return { orderId, orderTitle, orderCode, href };
 }

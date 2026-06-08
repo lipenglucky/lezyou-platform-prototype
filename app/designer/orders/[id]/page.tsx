@@ -1,19 +1,22 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { getOrderById } from "@/mocks/orders";
-import { getClientById } from "@/mocks/clients";
+import { useOrder, useClient, useDesigners } from "@/lib/use-data";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { ProjectIdCopy } from "@/components/domain/project-id-copy";
 import {
   OrderStatusBadge,
   SpecialtyBadge,
 } from "@/components/domain/status-badges";
 import { StageTimeline } from "@/components/domain/stage-timeline";
+import { OrderWorkCalendarContentsPanel } from "@/components/domain/order-work-calendar-contents-panel";
+import { DesignerOrderScopePanel } from "@/components/domain/designer-order-scope-panel";
+import { sumDesignerOrderNetEarnings } from "@/lib/designer-order-scope";
 import {
   ArrowLeft,
   Calendar,
@@ -29,17 +32,83 @@ import {
 } from "lucide-react";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { useSessionStore } from "@/store/session-store";
+import { useRoleStore } from "@/store/role-store";
+import {
+  acceptOrderRequest,
+  designerSignOrderRequest,
+  submitStageDeliverablesRequest,
+  requestProjectSettlementRequest,
+} from "@/lib/api-client";
+import { needsDesignerSign } from "@/lib/order-lifecycle";
+import { DisputeFilingDialog } from "@/components/domain/dispute-filing-dialog";
+import { useState } from "react";
 
 export default function DesignerOrderDetailPage({
   params,
 }: {
   params: { id: string };
 }) {
-  const order = getOrderById(params.id);
-  if (!order) notFound();
-
-  const client = getClientById(order.clientId);
+  const { data: order, loading, refresh } = useOrder(params.id);
+  const { data: client } = useClient(order?.clientId);
+  const { data: designers } = useDesigners();
+  const getDesigner = useMemo(
+    () => (id: string) => designers.find((d) => d.id === id),
+    [designers],
+  );
   const push = useSessionStore((s) => s.pushNotification);
+  const identityId = useRoleStore((s) => s.identityId);
+  const currentDesignerId = identityId || order?.designerId || "";
+  const [busy, setBusy] = useState(false);
+  const [disputeOpen, setDisputeOpen] = useState(false);
+
+  const runAction = async (
+    fn: () => Promise<unknown>,
+    successTitle: string,
+    successDescription?: string,
+  ) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+      push({
+        title: successTitle,
+        description: successDescription,
+        variant: "success",
+      });
+      refresh();
+    } catch (e) {
+      push({
+        title: "操作失败",
+        description: e instanceof Error ? e.message : "请稍后再试",
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAccept = () =>
+    runAction(
+      () => acceptOrderRequest(order!.id),
+      "已确认档期",
+      "等待双方签约并支付预付款。",
+    );
+
+  if (loading) {
+    return (
+      <div className="py-20 text-center text-ink-60">正在加载项目详情...</div>
+    );
+  }
+  if (!order) {
+    return (
+      <div className="py-20 text-center text-ink-60">未找到该项目或无权访问。</div>
+    );
+  }
+
+  const myNetEarnings = currentDesignerId
+    ? sumDesignerOrderNetEarnings(order, currentDesignerId)
+    : 0;
+  const feePct = Math.round((order.feeRate ?? 0.08) * 100);
 
   return (
     <div className="space-y-6">
@@ -58,7 +127,7 @@ export default function DesignerOrderDetailPage({
                 <div className="flex flex-wrap items-center gap-2">
                   <SpecialtyBadge specialty={order.specialty} />
                   <OrderStatusBadge status={order.status} />
-                  <span className="text-xs text-ink-40">{order.code}</span>
+                  <ProjectIdCopy code={order.code} />
                 </div>
                 <h1 className="text-2xl font-semibold tracking-tight text-ink">
                   {order.title}
@@ -68,13 +137,12 @@ export default function DesignerOrderDetailPage({
                 </p>
               </div>
               <div className="text-right">
-                <div className="text-xs text-ink-60">订单总额</div>
+                <div className="text-xs text-ink-60">我的预计实收</div>
                 <div className="text-2xl font-semibold tracking-tight text-ink">
-                  {formatCurrency(order.totalAmount)}
+                  {formatCurrency(myNetEarnings)}
                 </div>
                 <div className="mt-1 text-xs text-emerald-700">
-                  实际到账(扣 8% 手续费){" "}
-                  {formatCurrency(Math.round(order.totalAmount * 0.92))}
+                  仅含本专业相关阶段 · 已扣 {feePct}% 平台费
                 </div>
               </div>
             </div>
@@ -83,7 +151,17 @@ export default function DesignerOrderDetailPage({
 
             <div className="grid gap-4 text-sm md:grid-cols-2 lg:grid-cols-4">
               <Field label="服务模式" value={order.serviceMode === "online" ? "纯线上" : "线下上门"} icon={MapPin} />
-              <Field label="计费模式" value={order.billingMode === "daily" ? "按天计费" : "按月雇佣"} icon={Clock} />
+              <Field
+                label="计费模式"
+                value={
+                  order.billingMode === "area"
+                    ? "常规面积报价"
+                    : order.billingMode === "daily"
+                      ? "按工时"
+                      : "按月雇佣"
+                }
+                icon={Clock}
+              />
               <Field label="项目类型" value={order.projectType} />
               <Field label="预期交付" value={formatDate(order.expectedDeliveryAt)} icon={Calendar} />
             </div>
@@ -118,12 +196,17 @@ export default function DesignerOrderDetailPage({
                         <Button
                           size="sm"
                           variant="brand"
+                          disabled={busy}
                           onClick={() =>
-                            push({
-                              title: "返修方案已上传",
-                              description: "委托人将收到通知。",
-                              variant: "success",
-                            })
+                            runAction(
+                              () =>
+                                submitStageDeliverablesRequest(
+                                  order.id,
+                                  r.stageId,
+                                ),
+                              "返修成果已上传",
+                              "委托人将收到验收提醒。",
+                            )
                           }
                         >
                           <Upload className="h-3.5 w-3.5" /> 上传返修方案
@@ -136,18 +219,42 @@ export default function DesignerOrderDetailPage({
             </Card>
           ) : null}
 
+          {currentDesignerId ? (
+            <DesignerOrderScopePanel
+              order={order}
+              designerId={currentDesignerId}
+              getDesigner={getDesigner}
+            />
+          ) : null}
+
+          <OrderWorkCalendarContentsPanel order={order} perspective="designer" />
+
           <Card className="p-7">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold tracking-tight text-ink">
-                  阶段成果交付
+                  本专业付款阶段
                 </h2>
                 <p className="mt-1 text-sm text-ink-60">
-                  上传阶段成果文件 · 委托人付款解锁下载后,款项进入你的托管钱包。
+                  仅展示与你相关的阶段款项与成果 · 委托方已支付后可至钱包申请提现。
                 </p>
               </div>
             </div>
-            <StageTimeline order={order} perspective="designer" />
+            <StageTimeline
+              order={order}
+              perspective="designer"
+              getDesigner={getDesigner}
+              collaboratorMode="designer"
+              currentDesignerId={currentDesignerId}
+              onUploadDeliverables={(stage) =>
+                runAction(
+                  () =>
+                    submitStageDeliverablesRequest(order.id, stage.id),
+                  "本阶段成果已上传",
+                  "委托人可预览并付款解锁下载。",
+                )
+              }
+            />
           </Card>
 
           <Card className="p-7">
@@ -243,6 +350,87 @@ export default function DesignerOrderDetailPage({
             </Button>
           </Card>
 
+          {["in_progress", "in_revision", "pending_review"].includes(
+            order.status,
+          ) && (
+            <Card className="p-5">
+              <div className="text-xs uppercase tracking-wider text-ink-40">
+                纠纷与申诉
+              </div>
+              <p className="mt-2 text-xs text-ink-60">
+                若委托人长期未付款或未响应，可申请平台介入。
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3 w-full"
+                onClick={() => setDisputeOpen(true)}
+              >
+                <ShieldAlert className="h-3.5 w-3.5" /> 申请平台介入
+              </Button>
+            </Card>
+          )}
+
+          {(order.status === "pending_schedule" ||
+            needsDesignerSign(order) ||
+            order.pendingSettlement) && (
+            <Card className="space-y-3 p-5">
+              <div className="text-xs uppercase tracking-wider text-ink-40">
+                待办操作
+              </div>
+              {order.status === "pending_schedule" && (
+                <>
+                  <p className="text-xs text-ink-60">
+                    委托人已提交档期申请，确认后双方可签约并支付预付款。
+                  </p>
+                  <Button
+                    variant="brand"
+                    size="sm"
+                    className="w-full"
+                    disabled={busy}
+                    onClick={handleAccept}
+                  >
+                    {busy ? "处理中..." : "确认接单档期"}
+                  </Button>
+                </>
+              )}
+              {needsDesignerSign(order) && (
+                <Button
+                  variant="brand"
+                  size="sm"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={() =>
+                    runAction(
+                      () => designerSignOrderRequest(order.id),
+                      "合同已签署",
+                      "请等待委托人签约并支付预付款。",
+                    )
+                  }
+                >
+                  签署电子合同
+                </Button>
+              )}
+              {order.pendingSettlement && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={() =>
+                    runAction(
+                      () => requestProjectSettlementRequest(order.id),
+                      "已申请项目结算",
+                      "请等待委托人确认最终服务完成。",
+                    )
+                  }
+                >
+                  申请项目结算
+                </Button>
+              )}
+            </Card>
+          )}
+
           <Card className="space-y-2 p-5 text-xs text-ink-60">
             <div className="flex items-start gap-2">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 text-brand" />
@@ -255,6 +443,22 @@ export default function DesignerOrderDetailPage({
           </Card>
         </aside>
       </div>
+
+      {order ? (
+        <DisputeFilingDialog
+          open={disputeOpen}
+          onOpenChange={setDisputeOpen}
+          order={order}
+          onFiled={() => {
+            push({
+              title: "纠纷申请已提交",
+              description: "平台管理员将尽快受理。",
+              variant: "success",
+            });
+            refresh();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

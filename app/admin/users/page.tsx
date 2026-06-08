@@ -1,16 +1,116 @@
 "use client";
 
-import Link from "next/link";
-import { Card } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { designers } from "@/mocks/designers";
-import { clients } from "@/mocks/clients";
+import { Suspense, useMemo } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { DesignerFiltersPanel } from "@/components/domain/designer-filters-panel";
+import { AdminDesignerUserTable } from "@/components/domain/admin-designer-user-table";
+import { AdminClientUserTable } from "@/components/domain/admin-client-user-table";
+import { PlatformAdminsPanel } from "@/components/domain/platform-admins-panel";
+import { isOngoingOrderStatus } from "@/lib/admin-designer-list";
+import { useDesignerFilters } from "@/lib/designer-filters";
+import {
+  useAdminClients,
+  useAdminDesigners,
+  useOrders,
+  usePlatformAdmins,
+} from "@/lib/use-data";
+import { clientWalletByOwnerId } from "@/mocks/wallet";
+import { clients as mockClients } from "@/mocks/clients";
+import { designers as mockDesigners } from "@/mocks/designers";
+import type { AdminClientRow, AdminDesignerRow } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ActivityDot } from "@/components/domain/activity-dot";
-import { OnlineDot } from "@/components/domain/status-badges";
 
-export default function AdminUsersPage() {
+function sumClientTotalPaid(clientId: string) {
+  const txs = clientWalletByOwnerId[clientId] ?? [];
+  return Math.abs(
+    txs
+      .filter((t) => t.type === "income" && t.amount < 0)
+      .reduce((acc, t) => acc + t.amount, 0),
+  );
+}
+
+function AdminUsersInner() {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const isSuperAdminConsole = pathname.startsWith("/super-admin");
+  const defaultTab = searchParams.get("tab") ?? "designers";
+
+  const { data: designersRaw, refresh } = useAdminDesigners();
+  const { data: clientsRaw, refresh: refreshClients } = useAdminClients();
+  const { data: orders } = useOrders();
+  const {
+    data: platformAdmins,
+    loading: platformAdminsLoading,
+    refresh: refreshPlatformAdmins,
+  } = usePlatformAdmins(isSuperAdminConsole);
+
+  const designers: AdminDesignerRow[] = useMemo(() => {
+    const base =
+      designersRaw.length > 0
+        ? designersRaw
+        : mockDesigners.map((d) => ({
+            ...d,
+            accountStatus: "active" as const,
+            ongoingOrdersCount: 0,
+          }));
+
+    if (designersRaw.length > 0) return base;
+
+    const ongoingByDesigner = new Map<string, number>();
+    for (const o of orders) {
+      if (isOngoingOrderStatus(o.status)) {
+        ongoingByDesigner.set(
+          o.designerId,
+          (ongoingByDesigner.get(o.designerId) ?? 0) + 1,
+        );
+      }
+    }
+    return base.map((d, i) => {
+      const row = d as AdminDesignerRow;
+      return {
+        ...row,
+        ongoingOrdersCount: ongoingByDesigner.get(row.id) ?? 0,
+        registeredAt:
+          row.registeredAt ??
+          `2025-${String((i % 12) + 1).padStart(2, "0")}-${String(8 + (i % 20)).padStart(2, "0")}`,
+      };
+    });
+  }, [designersRaw, orders]);
+
+  const clients: AdminClientRow[] = useMemo(() => {
+    const base =
+      clientsRaw.length > 0
+        ? clientsRaw
+        : mockClients.map((c) => ({
+            ...c,
+            accountStatus: "active" as const,
+            ongoingOrdersCount: 0,
+            totalPaidAmount: 0,
+          }));
+
+    if (clientsRaw.length > 0) return base;
+
+    const ongoingByClient = new Map<string, number>();
+    for (const o of orders) {
+      if (isOngoingOrderStatus(o.status)) {
+        ongoingByClient.set(
+          o.clientId,
+          (ongoingByClient.get(o.clientId) ?? 0) + 1,
+        );
+      }
+    }
+
+    return base.map((c) => ({
+      ...c,
+      ongoingOrdersCount: ongoingByClient.get(c.id) ?? 0,
+      totalPaidAmount: sumClientTotalPaid(c.id),
+      registeredAt: c.joinedAt,
+    }));
+  }, [clientsRaw, orders]);
+
+  const { filters, patchFilters, resetFilters, filtered } =
+    useDesignerFilters(designers);
+
   return (
     <div className="space-y-6">
       <div>
@@ -18,124 +118,72 @@ export default function AdminUsersPage() {
           用户管理
         </h2>
         <p className="mt-1 text-sm text-ink-60">
-          查看所有设计师与委托人账号,管理状态与权限。
+          查看所有设计师与委托人账号，管理状态与权限。
+          {isSuperAdminConsole ? "超级管理员还可管理平台管理员账号。" : ""}
+          设计师列表支持与「找设计」相同的全部筛选条件。
         </p>
       </div>
 
-      <Tabs defaultValue="designers">
+      <Tabs defaultValue={defaultTab} key={defaultTab}>
         <TabsList>
-          <TabsTrigger value="designers">设计师 · {designers.length}</TabsTrigger>
+          <TabsTrigger value="designers">
+            设计师 · {filtered.length}/{designers.length}
+          </TabsTrigger>
           <TabsTrigger value="clients">委托人 · {clients.length}</TabsTrigger>
+          {isSuperAdminConsole ? (
+            <TabsTrigger value="admins">
+              管理员 · {platformAdmins.length}
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
-        <TabsContent value="designers">
-          <Card className="overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="border-b border-ink-20 bg-ink-20/20 text-xs uppercase tracking-wider text-ink-40">
-                <tr>
-                  <th className="px-5 py-3 text-left">设计师</th>
-                  <th className="px-5 py-3 text-left">专业</th>
-                  <th className="px-5 py-3 text-left">所在地</th>
-                  <th className="px-5 py-3 text-left">在线 / 活跃</th>
-                  <th className="px-5 py-3 text-right">完成订单</th>
-                </tr>
-              </thead>
-              <tbody>
-                {designers.map((d) => (
-                  <tr
-                    key={d.id}
-                    className="border-b border-ink-20 last:border-b-0"
-                  >
-                    <td className="px-5 py-3">
-                      <Link
-                        href={`/designers/${d.id}`}
-                        className="flex items-center gap-3 hover:text-brand"
-                      >
-                        <Avatar className="h-9 w-9">
-                          <AvatarImage src={d.avatar} alt={d.name} />
-                          <AvatarFallback>{d.name.slice(0, 1)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <div className="font-medium text-ink">{d.name}</div>
-                          <div className="text-xs text-ink-60">{d.tagline}</div>
-                        </div>
-                      </Link>
-                    </td>
-                    <td className="px-5 py-3 text-ink-60">
-                      {d.specialty === "architecture"
-                        ? "建筑设计"
-                        : d.specialty === "landscape"
-                          ? "景观设计"
-                          : "室内设计"}
-                    </td>
-                    <td className="px-5 py-3 text-ink-60">{d.location}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <OnlineDot status={d.onlineStatus} />
-                        <ActivityDot level={d.activityIndicator} size="sm" />
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-right text-ink">
-                      {d.completedProjects}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+        <TabsContent value="designers" className="space-y-4">
+          <DesignerFiltersPanel
+            layout="toolbar"
+            sticky={false}
+            filters={filters}
+            onPatch={patchFilters}
+            onReset={resetFilters}
+            resultCount={filtered.length}
+          />
+
+          <AdminDesignerUserTable
+            designers={filtered}
+            isSuperAdmin={isSuperAdminConsole}
+            onRefresh={refresh}
+          />
         </TabsContent>
 
-        <TabsContent value="clients">
-          <Card className="overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="border-b border-ink-20 bg-ink-20/20 text-xs uppercase tracking-wider text-ink-40">
-                <tr>
-                  <th className="px-5 py-3 text-left">名称</th>
-                  <th className="px-5 py-3 text-left">类型</th>
-                  <th className="px-5 py-3 text-left">认证状态</th>
-                  <th className="px-5 py-3 text-left">注册时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                {clients.map((c) => (
-                  <tr
-                    key={c.id}
-                    className="border-b border-ink-20 last:border-b-0"
-                  >
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-9 w-9">
-                          <AvatarImage src={c.avatar} alt={c.name} />
-                          <AvatarFallback>{c.name.slice(0, 1)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <div className="font-medium text-ink">{c.name}</div>
-                          {c.companyName && (
-                            <div className="text-xs text-ink-60">
-                              {c.companyName}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3">
-                      <Badge variant={c.type === "enterprise" ? "brand" : "muted"}>
-                        {c.type === "enterprise" ? "企业" : "个人"}
-                      </Badge>
-                    </td>
-                    <td className="px-5 py-3">
-                      <Badge variant={c.verified ? "emerald" : "amber"}>
-                        {c.verified ? "已认证" : "待审核"}
-                      </Badge>
-                    </td>
-                    <td className="px-5 py-3 text-ink-60">{c.joinedAt}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+        <TabsContent value="clients" className="space-y-4">
+          <AdminClientUserTable
+            clients={clients}
+            isSuperAdmin={isSuperAdminConsole}
+            onRefresh={refreshClients}
+          />
         </TabsContent>
+
+        {isSuperAdminConsole ? (
+          <TabsContent value="admins">
+            <PlatformAdminsPanel
+              admins={platformAdmins}
+              loading={platformAdminsLoading}
+              refresh={refreshPlatformAdmins}
+            />
+          </TabsContent>
+        ) : null}
       </Tabs>
     </div>
+  );
+}
+
+export default function AdminUsersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-6 text-sm text-muted-foreground">加载中…</div>
+      }
+    >
+      <AdminUsersInner />
+    </Suspense>
   );
 }

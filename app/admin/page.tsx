@@ -3,265 +3,147 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { reviewQueue } from "@/mocks/reviews";
-import { useSessionStore } from "@/store/session-store";
+import { AdminPlatformDataCharts } from "@/components/domain/admin-platform-data-charts";
+import { useDisputeCounts, useOrders, useReviewItems } from "@/lib/use-data";
+import { cn, formatCurrency } from "@/lib/utils";
 import {
   AlertCircle,
   ArrowRight,
-  Building2,
-  CheckCircle2,
+  Award,
   ClipboardCheck,
   Coins,
-  ShieldCheck,
-  Sparkles,
+  PackageSearch,
   TrendingUp,
   Users,
-  XCircle,
 } from "lucide-react";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { useConsoleBasePath } from "@/components/layout/console-base-path";
 
 export default function AdminDashboardPage() {
-  const push = useSessionStore((s) => s.pushNotification);
+  const base = useConsoleBasePath();
+  const isSuper = base === "/super-admin";
+  const { data: reviewQueue } = useReviewItems();
+  const { data: orders } = useOrders();
+  const { data: disputeCounts } = useDisputeCounts();
+  const matchingOrderCount = orders.filter((o) => o.status === "matching").length;
 
   const designerQueue = reviewQueue.filter(
     (r) => r.type === "designer" && r.status === "pending",
   );
-  const enterpriseQueue = reviewQueue.filter(
-    (r) => r.type === "enterprise" && r.status === "pending",
+  const promotionQueue = reviewQueue.filter(
+    (r) => r.type === "designer_promotion" && r.status === "pending",
+  );
+  const levelPromotionQueue = reviewQueue.filter(
+    (r) => r.type === "designer_level_promotion" && r.status === "pending",
   );
 
-  const stats = [
-    { label: "待审核入驻", value: designerQueue.length, icon: ClipboardCheck, tone: "amber" },
-    { label: "待审核企业", value: enterpriseQueue.length, icon: Building2, tone: "amber" },
-    { label: "今日新订单", value: 14, icon: TrendingUp, tone: "emerald" },
-    { label: "进行中纠纷", value: 1, icon: AlertCircle, tone: "rose" },
+  const stats: {
+    label: string;
+    value: number;
+    icon: typeof ClipboardCheck;
+    tone: string;
+    href: string;
+  }[] = [
+    {
+      label: "待匹配订单",
+      value: matchingOrderCount,
+      icon: PackageSearch,
+      tone: "amber",
+      href: `${base}/orders?status=matching`,
+    },
+    {
+      label: "待审核入驻",
+      value: designerQueue.length,
+      icon: ClipboardCheck,
+      tone: "amber",
+      href: `${base}/reviews?tab=designer`,
+    },
+    {
+      label: "待见习晋级",
+      value: promotionQueue.length,
+      icon: TrendingUp,
+      tone: "emerald",
+      href: `${base}/reviews?tab=promotion`,
+    },
+    {
+      label: "待等级晋级",
+      value: levelPromotionQueue.length,
+      icon: Award,
+      tone: "violet",
+      href: `${base}/reviews?tab=level_promotion`,
+    },
+    {
+      label: "进行中纠纷",
+      value: disputeCounts.active,
+      icon: AlertCircle,
+      tone: "rose",
+      href: `${base}/disputes`,
+    },
   ];
-
-  const handleApprove = (name: string) => {
-    push({
-      title: `已通过审核 · ${name}`,
-      variant: "success",
-      description: "已发送通知,账号正式上线。",
-    });
-  };
-
-  const handleReject = (name: string) => {
-    push({
-      title: `已驳回 · ${name}`,
-      variant: "destructive",
-      description: "已通知申请人完善资料后重新提交。",
-    });
-  };
 
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight text-ink">
-            管理员工作台
+            {isSuper ? "超级管理员工作台" : "管理员工作台"}
           </h2>
           <p className="mt-1 text-sm text-ink-60">
-            审核入驻申请、监管订单与资金、处理用户纠纷。
+            {isSuper
+              ? "除常规后台能力外，可在「参数中心」调整全局计费规则。"
+              : "审核入驻申请、监管订单与资金、处理用户纠纷。"}
           </p>
         </div>
         <div className="flex gap-2">
           <Button asChild variant="outline">
-            <Link href="/admin/orders">
+            <Link href={`${base}/orders`}>
               订单监管 <ArrowRight className="h-4 w-4" />
             </Link>
           </Button>
           <Button asChild variant="brand">
-            <Link href="/admin/disputes">处理纠纷</Link>
+            <Link href={`${base}/disputes`}>处理纠纷</Link>
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {stats.map((s) => {
           const Icon = s.icon;
           const toneMap: Record<string, string> = {
             amber: "bg-amber-100 text-amber-700",
             emerald: "bg-emerald-100 text-emerald-700",
+            violet: "bg-violet-100 text-violet-700",
             rose: "bg-rose-100 text-rose-700",
           };
           return (
-            <Card key={s.label} className="p-5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs uppercase tracking-wider text-ink-40">
-                  {s.label}
-                </span>
-                <div
-                  className={`flex h-8 w-8 items-center justify-center rounded-full ${toneMap[s.tone]}`}
-                >
-                  <Icon className="h-4 w-4" />
+            <Link key={s.label} href={s.href} className="block">
+              <Card
+                className={cn(
+                  "p-5 transition-all hover:border-ink hover:shadow-md",
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wider text-ink-40">
+                    {s.label}
+                  </span>
+                  <div
+                    className={`flex h-8 w-8 items-center justify-center rounded-full ${toneMap[s.tone]}`}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </div>
                 </div>
-              </div>
-              <div className="mt-3 text-3xl font-semibold tracking-tight text-ink">
-                {s.value}
-              </div>
-            </Card>
+                <div className="mt-3 text-3xl font-semibold tracking-tight text-ink">
+                  {s.value}
+                </div>
+                <p className="mt-2 text-[11px] text-ink-40">
+                  演示案例 · 点击查看并处理
+                </p>
+              </Card>
+            </Link>
           );
         })}
       </div>
 
-      <Card className="p-6">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold tracking-tight text-ink">
-              资质审核队列
-            </h3>
-            <p className="mt-1 text-xs text-ink-60">
-              设计师入驻申请与企业委托人营业执照,需在 1 个工作日内反馈。
-            </p>
-          </div>
-        </div>
-
-        <Tabs defaultValue="designer">
-          <TabsList>
-            <TabsTrigger value="designer" className="gap-2">
-              <Sparkles className="h-3.5 w-3.5" />
-              设计师入驻
-              <Badge variant="muted">{designerQueue.length}</Badge>
-            </TabsTrigger>
-            <TabsTrigger value="enterprise" className="gap-2">
-              <Building2 className="h-3.5 w-3.5" />
-              企业委托人
-              <Badge variant="muted">{enterpriseQueue.length}</Badge>
-            </TabsTrigger>
-            <TabsTrigger value="history" className="gap-2">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              历史记录
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="designer">
-            <div className="space-y-3">
-              {designerQueue.map((item) => (
-                <Card key={item.id} className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="flex-1 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="amber">待审核</Badge>
-                        <h4 className="text-base font-semibold text-ink">
-                          {item.name}
-                        </h4>
-                        <span className="text-xs text-ink-40">
-                          提交于 {formatDateTime(item.submittedAt)}
-                        </span>
-                      </div>
-                      <div className="grid gap-x-6 gap-y-1.5 text-xs text-ink-60 md:grid-cols-2">
-                        {Object.entries(item.payload).map(([k, v]) => (
-                          <div key={k}>
-                            <span className="text-ink-40">{k}:</span>{" "}
-                            <span className="text-ink">{v}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleReject(item.name)}
-                      >
-                        <XCircle className="h-3.5 w-3.5" /> 驳回
-                      </Button>
-                      <Button
-                        variant="brand"
-                        size="sm"
-                        onClick={() => handleApprove(item.name)}
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5" /> 通过审核
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="enterprise">
-            <div className="space-y-3">
-              {enterpriseQueue.map((item) => (
-                <Card key={item.id} className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="flex-1 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="amber">待审核</Badge>
-                        <h4 className="text-base font-semibold text-ink">
-                          {item.name}
-                        </h4>
-                        <span className="text-xs text-ink-40">
-                          提交于 {formatDateTime(item.submittedAt)}
-                        </span>
-                      </div>
-                      <div className="grid gap-x-6 gap-y-1.5 text-xs text-ink-60 md:grid-cols-2">
-                        {Object.entries(item.payload).map(([k, v]) => (
-                          <div key={k}>
-                            <span className="text-ink-40">{k}:</span>{" "}
-                            <span className="text-ink">{v}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleReject(item.name)}
-                      >
-                        <XCircle className="h-3.5 w-3.5" /> 驳回
-                      </Button>
-                      <Button
-                        variant="brand"
-                        size="sm"
-                        onClick={() => handleApprove(item.name)}
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5" /> 通过审核
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="history">
-            <div className="space-y-3">
-              {reviewQueue
-                .filter((r) => r.status !== "pending")
-                .map((item) => (
-                  <Card key={item.id} className="p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          {item.status === "approved" ? (
-                            <Badge variant="emerald">已通过</Badge>
-                          ) : (
-                            <Badge variant="rose">已驳回</Badge>
-                          )}
-                          <h4 className="text-sm font-semibold text-ink">
-                            {item.name}
-                          </h4>
-                          <span className="text-xs text-ink-40">
-                            {formatDateTime(item.submittedAt)}
-                          </span>
-                        </div>
-                        {item.payload["驳回理由"] && (
-                          <div className="mt-2 text-xs text-ink-60">
-                            驳回理由:{item.payload["驳回理由"]}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-            </div>
-          </TabsContent>
-        </Tabs>
-      </Card>
+      <AdminPlatformDataCharts />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-6">
@@ -298,7 +180,7 @@ export default function AdminDashboardPage() {
             {formatCurrency(348000)}
           </div>
           <div className="mt-1 text-xs text-ink-60">
-            手续费率 8% · 较上月 +12.4%
+            较上月 +12.4%
           </div>
         </Card>
       </div>

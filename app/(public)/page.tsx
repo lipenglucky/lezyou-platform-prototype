@@ -5,8 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { DesignerCard } from "@/components/domain/designer-card";
 import { BountyCard } from "@/components/domain/bounty-card";
-import { designers } from "@/mocks/designers";
-import { bounties } from "@/mocks/bounties";
+import { listDesigners, listBounties } from "@/lib/server/repo";
 import { SPECIALTIES } from "@/lib/constants";
 import {
   ArrowRight,
@@ -17,49 +16,58 @@ import {
   Building2,
   TreeDeciduous,
   Sofa,
-  CalendarRange,
+  Camera,
   Coins,
+  CalendarRange,
 } from "lucide-react";
 
-export default function HomePage() {
-  const topDesigners = [...designers]
-    .sort((a, b) => (b.onlineStatus === "online" ? 1 : -1))
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const [allDesigners, allBounties] = await Promise.all([
+    listDesigners(),
+    listBounties(),
+  ]);
+  const topDesigners = [...allDesigners]
+    .sort((a, b) => {
+      const ao = a.onlineStatus === "online" ? 1 : 0;
+      const bo = b.onlineStatus === "online" ? 1 : 0;
+      return bo - ao;
+    })
     .slice(0, 6);
-  const hotBounties = bounties.slice(0, 3);
+  const hotBounties = allBounties.slice(0, 3);
 
   return (
     <>
-      <section className="gradient-hero">
-        <div className="container-page py-20 lg:py-28">
+      <section className="gradient-hero overflow-x-clip">
+        {/* 右下角悬浮卡片 absolute -bottom-6，需预留底部留白避免压到下一版块 */}
+        <div className="container-page pb-28 pt-20 lg:pb-36 lg:pt-28">
           <div className="grid gap-12 lg:grid-cols-[1.2fr_1fr] lg:items-center">
             <div className="space-y-7">
               <Badge variant="outline" className="gap-1.5">
                 <Sparkles className="h-3 w-3 text-brand" />
-                建筑 · 景观 · 室内 三大设计专业 一站式对接
+                建筑 · 景观 · 室内 · 效果图 · 造价 五大专业 一站式对接
               </Badge>
               <h1 className="text-balance text-5xl font-semibold leading-[1.1] tracking-tight text-ink lg:text-6xl">
-                让对的设计师,
+                让对的设计师，
                 <br />
                 <span className="text-brand">遇见对的项目。</span>
               </h1>
               <p className="max-w-xl text-base text-ink-60">
-                乐自由是面向工程设计行业的双向对接平台。委托方可直接搜索设计师下单或公开悬赏招标,
-                设计师在线交付方案与施工图,平台托管资金、自动签署电子合同、分阶段结算,
-                让合作干净透明。
+                乐自由是面向工程设计行业的双向对接平台。委托方可直接搜索设计师下单，
+                或公开悬赏招标；设计师在线交付方案与施工图，
+                平台托管资金、自动签署电子合同、分阶段结算，让合作干净透明。
               </p>
               <div className="flex flex-wrap gap-3">
-                <Button asChild size="lg" variant="brand">
-                  <Link href="/designers">
-                    寻找设计师 <ArrowRight className="h-4 w-4" />
+                <Button asChild size="lg" variant="brand" className="gap-2">
+                  <Link href="/entrust/new">
+                    发布委托项目 <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>
                 <Button asChild size="lg" variant="outline">
-                  <Link href="/bounties/new">
-                    发布悬赏项目
+                  <Link href="/designers">
+                    浏览全部设计师 <ArrowRight className="h-4 w-4" />
                   </Link>
-                </Button>
-                <Button asChild size="lg" variant="ghost">
-                  <Link href="/login?register=1">设计师入驻 →</Link>
                 </Button>
               </div>
               <div className="grid grid-cols-3 gap-6 border-t border-ink-20 pt-6 text-center md:max-w-md md:text-left">
@@ -84,7 +92,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="relative">
+            <div className="relative z-10">
               <div className="grid grid-cols-2 gap-4">
                 <div className="overflow-hidden rounded-3xl">
                   <Image
@@ -123,7 +131,7 @@ export default function HomePage() {
                 <div>
                   <div className="text-xs text-ink-60">资金已托管</div>
                   <div className="text-sm font-semibold text-ink">
-                    分阶段付款 · 30 天验收期
+                    分阶段付款 · 平台监管，不满意退款
                   </div>
                 </div>
               </Card>
@@ -136,42 +144,65 @@ export default function HomePage() {
         <div className="mb-10 flex items-end justify-between">
           <div>
             <Badge variant="muted" className="mb-3">
-              三大专业领域
+              专业服务
             </Badge>
             <h2 className="text-3xl font-semibold tracking-tight text-ink">
-              选择你需要的设计专业
+              五大专业领域
             </h2>
+            <p className="mt-2 text-sm text-ink-60">
+              建筑 / 景观 / 室内 · 效果图 / 动画 · 造价咨询，三级专业层级精细化匹配。
+            </p>
           </div>
         </div>
-        <div className="grid gap-6 md:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           {SPECIALTIES.map((s) => {
             const Icon =
               s.value === "architecture"
                 ? Building2
                 : s.value === "landscape"
                   ? TreeDeciduous
-                  : Sofa;
+                  : s.value === "interior"
+                    ? Sofa
+                    : s.value === "rendering"
+                      ? Camera
+                      : Coins;
             return (
-              <Link
-                key={s.value}
-                href={`/designers?specialty=${s.value}`}
-                className="group"
-              >
-                <Card className="h-full p-7 transition-all hover:border-ink hover:shadow-md">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-ink-20/50 group-hover:bg-ink group-hover:text-white">
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <h3 className="mt-5 text-xl font-semibold text-ink">
-                    {s.label}
-                  </h3>
-                  <p className="mt-2 text-sm text-ink-60">{s.description}</p>
-                  <div className="mt-6 inline-flex items-center gap-1 text-sm font-medium text-brand">
-                    浏览 {s.label}设计师 <ArrowRight className="h-4 w-4" />
-                  </div>
-                </Card>
-              </Link>
+              <Card key={s.value} className="h-full p-6">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink-20/50">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="mt-4 text-base font-semibold text-ink">
+                  {s.label}
+                </h3>
+                <p className="mt-1.5 line-clamp-3 text-xs text-ink-60">
+                  {s.description}
+                </p>
+              </Card>
             );
           })}
+        </div>
+      </section>
+
+      <section className="container-page pb-20 pt-10">
+        <div className="mb-8 flex items-end justify-between">
+          <div>
+            <Badge variant="muted" className="mb-3">
+              悬赏大厅
+            </Badge>
+            <h2 className="text-3xl font-semibold tracking-tight text-ink">
+              正在招标的项目
+            </h2>
+          </div>
+          <Button asChild variant="outline">
+            <Link href="/bounties">
+              全部悬赏 <ArrowRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        </div>
+        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+          {hotBounties.map((b) => (
+            <BountyCard key={b.id} bounty={b} />
+          ))}
         </div>
       </section>
 
@@ -201,26 +232,58 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="container-page py-20">
+      <section className="container-page py-10">
         <div className="mb-8 flex items-end justify-between">
           <div>
             <Badge variant="muted" className="mb-3">
-              悬赏大厅
+              v1.1 增值服务
             </Badge>
             <h2 className="text-3xl font-semibold tracking-tight text-ink">
-              正在招标的项目
+              一个平台 · 三层服务保障
             </h2>
+            <p className="mt-2 text-sm text-ink-60">
+              在设计交付之外，平台还提供专业审图与项目管理两项增值服务，
+              帮助委托人把控质量与进度。
+            </p>
           </div>
           <Button asChild variant="outline">
-            <Link href="/bounties">
-              全部悬赏 <ArrowRight className="h-4 w-4" />
+            <Link href="/calculator">
+              <Coins className="h-4 w-4" /> 试用费用计算器
             </Link>
           </Button>
         </div>
-        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {hotBounties.map((b) => (
-            <BountyCard key={b.id} bounty={b} />
-          ))}
+        <div className="grid gap-5 md:grid-cols-3">
+          <Card className="p-6">
+            <Badge variant="brand" className="mb-3">设计 · 必选</Badge>
+            <h3 className="text-lg font-semibold text-ink">在线设计交付</h3>
+            <p className="mt-2 text-sm text-ink-60">
+              从方案、扩初到施工图、竣工图全阶段，五大专业三级专业精细划分。
+              支持远程交付与驻场服务。
+            </p>
+            <div className="mt-4 text-xs text-ink-40">
+              出图费 = 基数 × 8 项系数（地区 / 类型 / 等级 / 客户 / 难度 / 协调 / 建造 / 税率）
+            </div>
+          </Card>
+          <Card className="p-6">
+            <Badge variant="amber" className="mb-3">审图 · 可加购</Badge>
+            <h3 className="text-lg font-semibold text-ink">独立第三方审图</h3>
+            <p className="mt-2 text-sm text-ink-60">
+              资深审图师对设计师图纸进行审核并出具审图文档，确保质量到位。
+              审图师对设计师从「不及格」到「杰出」分五档评级。
+            </p>
+            <div className="mt-4 text-xs text-ink-40">
+              定价：对应专业出图费的 8%，可单选或全选所有三级专业
+            </div>
+          </Card>
+          <Card className="p-6">
+            <Badge variant="violet" className="mb-3">项目管理 · 可加购</Badge>
+            <h3 className="text-lg font-semibold text-ink">项目经理代为统筹</h3>
+            <p className="mt-2 text-sm text-ink-60">
+              对外与客户沟通、线上线下参会，对内协调各专业，输出会议纪要并把控进度。
+              选择与客户同城的项目经理。
+            </p>
+            <div className="mt-4 text-xs text-ink-40">定价：项目总设计费的 20%</div>
+          </Card>
         </div>
       </section>
 
@@ -307,7 +370,7 @@ export default function HomePage() {
                   variant="outline"
                   className="border-white/30 bg-transparent text-white hover:bg-white/10"
                 >
-                  <Link href="/bounties/new">发布悬赏</Link>
+                  <Link href="/entrust/new?mode=bounty">发布悬赏</Link>
                 </Button>
               </div>
             </div>
@@ -328,7 +391,7 @@ export default function HomePage() {
                   典型设计师故事
                 </div>
                 <div className="mt-2 text-base font-semibold">
-                  陈牧之 · 自由建筑设计师
+                  陈牧之 · 景观施工图设计师
                 </div>
                 <div className="mt-1 text-xs text-white/60">
                   入驻 8 个月承接 11 单,平台托管资金确保每一笔都按时到账。

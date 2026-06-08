@@ -10,7 +10,7 @@ export function Toaster() {
   const dismiss = useSessionStore((s) => s.dismissNotification);
 
   return (
-    <div className="pointer-events-none fixed right-6 top-6 z-[100] flex w-full max-w-sm flex-col gap-3">
+    <div className="pointer-events-none fixed right-6 top-6 z-[100] flex max-w-sm flex-col items-end gap-3">
       {notifications.map((n) => {
         const Icon =
           n.variant === "destructive"
@@ -22,7 +22,7 @@ export function Toaster() {
           <div
             key={n.id}
             className={cn(
-              "pointer-events-auto flex items-start gap-3 rounded-2xl border border-ink-20 bg-white p-4 shadow-xl animate-fade-in",
+              "pointer-events-auto w-full max-w-sm flex items-start gap-3 rounded-2xl border border-ink-20 bg-white p-4 shadow-xl animate-fade-in",
               n.variant === "success" && "border-emerald-200",
               n.variant === "destructive" && "border-rose-200",
             )}

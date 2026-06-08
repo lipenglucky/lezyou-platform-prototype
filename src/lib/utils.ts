@@ -13,6 +13,11 @@ export function formatCurrency(value: number) {
   }).format(value);
 }
 
+/** 悬赏金额展示（平台悬赏均为确定费用） */
+export function formatBountyReward(reward: number) {
+  return formatCurrency(Math.max(0, reward));
+}
+
 export function formatDate(value: string | Date) {
   const date = typeof value === "string" ? new Date(value) : value;
   return new Intl.DateTimeFormat("zh-CN", {
@@ -31,6 +36,16 @@ export function formatDateTime(value: string | Date) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+export function formatPercent(ratio: number) {
+  const pct = ratio * 100;
+  return Number.isInteger(pct) ? String(pct) : pct.toFixed(1).replace(/\.0$/, "");
+}
+
+export function formatServicePeriod(from: string, to?: string) {
+  const end = to ? formatDateTime(to) : "至今";
+  return `${formatDateTime(from)} — ${end}`;
 }
 
 export function relativeTime(value: string | Date) {

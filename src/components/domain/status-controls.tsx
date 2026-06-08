@@ -11,10 +11,19 @@ import {
 import type { Designer, WorkloadStatus } from "@/lib/types";
 import { ActivityDot } from "./activity-dot";
 import { useSessionStore } from "@/store/session-store";
+import {
+  designerCanAcceptOrders,
+  portfolioReadinessHint,
+} from "@/lib/designer-portfolio-readiness";
 import { Briefcase, PencilLine, Plane, Wifi } from "lucide-react";
+import Link from "next/link";
 
 export function StatusControls({ designer }: { designer: Designer }) {
-  const [online, setOnline] = useState(designer.onlineStatus === "online");
+  const canAcceptOrders = designerCanAcceptOrders(designer);
+  const readinessHint = portfolioReadinessHint(designer);
+  const [online, setOnline] = useState(
+    designer.onlineStatus === "online" && canAcceptOrders,
+  );
   const [workload, setWorkload] = useState<WorkloadStatus>(designer.workloadStatus);
   const [travel, setTravel] = useState(designer.isOpenToTravel);
   const [hand, setHand] = useState(designer.supportsHandDrawing);
@@ -41,6 +50,21 @@ export function StatusControls({ designer }: { designer: Designer }) {
       </div>
 
       <div className="mt-5 space-y-5">
+        {!canAcceptOrders ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+            <div className="font-medium">暂不可接单</div>
+            <p className="mt-1 leading-relaxed text-amber-800/90">
+              {readinessHint ||
+                "请先在作品管理中上传项目类型案例，方可开启在线接单与平台匹配。"}
+            </p>
+            <Link
+              href="/designer/portfolio"
+              className="mt-2 inline-block font-medium text-brand hover:underline"
+            >
+              前往作品管理 →
+            </Link>
+          </div>
+        ) : null}
         <div className="flex items-center justify-between rounded-xl border border-ink-20 p-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-ink-20/40">
@@ -59,7 +83,16 @@ export function StatusControls({ designer }: { designer: Designer }) {
             </span>
             <Switch
               checked={online}
+              disabled={!canAcceptOrders && !online}
               onCheckedChange={(v) => {
+                if (v && !canAcceptOrders) {
+                  push({
+                    title: "请先上传项目类型案例",
+                    description: readinessHint,
+                    variant: "destructive",
+                  });
+                  return;
+                }
                 setOnline(v);
                 push({
                   title: v ? "已上线 · 开放接单" : "已离线",

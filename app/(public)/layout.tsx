@@ -1,3 +1,5 @@
+import "../globals.css";
+
 import { PublicHeader } from "@/components/layout/public-header";
 import { PublicFooter } from "@/components/layout/public-footer";
 

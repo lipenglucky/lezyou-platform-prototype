@@ -4,10 +4,11 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { DesignerName } from "@/components/domain/designer-name";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSessionStore } from "@/store/session-store";
-import { getDesignerById } from "@/mocks/designers";
+import { useDesigners } from "@/lib/use-data";
 import { SpecialtyBadge } from "@/components/domain/status-badges";
 import {
   AlertCircle,
@@ -66,6 +67,8 @@ const HIRES: Hire[] = [
 
 export default function MonthlyHirePage() {
   const push = useSessionStore((s) => s.pushNotification);
+  const { data: designers } = useDesigners();
+  const getDesignerById = (id: string) => designers.find((d) => d.id === id);
 
   const handleRenew = (h: Hire, designer: any) => {
     push({
@@ -86,11 +89,10 @@ export default function MonthlyHirePage() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold tracking-tight text-ink">
-          按月雇佣 · 续约中心
+          按月雇佣 · 续费中心
         </h2>
         <p className="mt-1 text-sm text-ink-60">
-          每月 20 号是固定续约确认日。20 号前完成次月费用支付,服务自动延续;
-          否则次月服务自动终止。
+          首月签约预付，此后每月 25 号前支付下一个月服务费；逾期未付则次月服务自动终止。
         </p>
       </div>
 
@@ -99,10 +101,10 @@ export default function MonthlyHirePage() {
           <AlertCircle className="mt-0.5 h-5 w-5 text-amber-600" />
           <div className="flex-1">
             <div className="text-sm font-semibold text-amber-900">
-              本月续约提醒(2026 年 5 月)
+              本月续费提醒(2026 年 5 月)
             </div>
             <div className="mt-1 text-xs text-amber-800">
-              你有 <strong>1 项</strong> 雇佣处于续约窗口期,请在 5 月 20 号前确认次月续约。
+              你有 <strong>1 项</strong> 雇佣处于续费窗口期,请在 5 月 25 号前支付 6 月服务费。
             </div>
           </div>
         </div>
@@ -136,7 +138,7 @@ export default function MonthlyHirePage() {
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-base font-semibold text-ink">
-                            {designer.name}
+                            <DesignerName designer={designer} />
                           </h3>
                           <SpecialtyBadge specialty={designer.specialty} />
                           {inWindow ? (
@@ -179,7 +181,7 @@ export default function MonthlyHirePage() {
                             提前续约
                           </Button>
                           <span className="text-xs text-ink-40">
-                            5 月 20 号开放续约
+                            5 月 25 号前可预付下月
                           </span>
                         </>
                       )}
@@ -191,8 +193,8 @@ export default function MonthlyHirePage() {
                       <div className="flex items-start gap-2">
                         <Sparkles className="mt-0.5 h-3.5 w-3.5 text-amber-600" />
                         <div>
-                          <strong className="text-ink">续约提醒规则:</strong>{" "}
-                          5 月 20 号(本月 20 号)前完成下月续费支付,服务自动延续;
+                          <strong className="text-ink">续费规则:</strong>{" "}
+                          每月 25 号前支付下一个月服务费,服务自动延续;
                           未按时续费,本月期满后自动终止次月服务。
                         </div>
                       </div>
@@ -220,7 +222,7 @@ export default function MonthlyHirePage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <h3 className="text-base font-semibold text-ink">
-                            {designer.name}
+                            <DesignerName designer={designer} />
                           </h3>
                           <Badge variant="muted">已终止</Badge>
                         </div>

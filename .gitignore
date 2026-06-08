@@ -6,6 +6,7 @@ node_modules
 *.log
 dist
 out
+backups/
 .vercel
 .cache
 *.tsbuildinfo

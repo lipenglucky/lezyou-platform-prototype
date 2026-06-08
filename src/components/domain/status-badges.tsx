@@ -35,18 +35,28 @@ export function WorkloadBadge({ status }: { status: WorkloadStatus }) {
 
 const ORDER_VARIANT_MAP = {
   matching: "muted",
+  pending_schedule: "blue",
   pending_contract: "amber",
   in_progress: "brand",
   pending_review: "blue",
   in_revision: "violet",
   completed: "emerald",
   terminated: "rose",
+  cancelled: "muted",
 } as const;
 
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
+export function OrderStatusBadge({
+  status,
+  label,
+}: {
+  status: OrderStatus;
+  label?: string;
+}) {
   const variant = ORDER_VARIANT_MAP[status];
   return (
-    <Badge variant={variant as any}>{ORDER_STATUS_META[status].label}</Badge>
+    <Badge variant={variant as any}>
+      {label ?? ORDER_STATUS_META[status].label}
+    </Badge>
   );
 }
 

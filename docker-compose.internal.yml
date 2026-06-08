@@ -1,0 +1,9 @@
+# 内测叠加配置：直接暴露 3000 端口，无需 Nginx 即可用 http://公网IP:3000 访问
+# 用法：docker compose -f docker-compose.yml -f docker-compose.internal.yml up -d --build
+#
+# 请确保 .env 中 COOKIE_SECURE=false，PUBLIC_BASE_URL=http://公网IP:3000
+
+services:
+  app:
+    ports:
+      - "0.0.0.0:3000:3000"

@@ -2,27 +2,28 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { bounties } from "@/mocks/bounties";
+import { useBounties } from "@/lib/use-data";
 import { BountyCard } from "@/components/domain/bounty-card";
+import {
+  BountyFiltersPanel,
+  createDefaultBountyFilters,
+} from "@/components/domain/bounty-filters-panel";
+import { filterBounties } from "@/lib/bounty-filters";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { SPECIALTIES } from "@/lib/constants";
-import type { Specialty } from "@/lib/types";
 import { Megaphone, PlusCircle } from "lucide-react";
+import { bountyApplicantCount } from "@/lib/bounty-privacy";
 import { formatCurrency } from "@/lib/utils";
 
 export default function BountiesPage() {
-  const [specialty, setSpecialty] = useState<Specialty | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "in_review">(
-    "all",
-  );
+  const [filters, setFilters] = useState(createDefaultBountyFilters);
+  const { data: bounties } = useBounties();
 
-  const filtered = useMemo(() => {
-    return bounties
-      .filter((b) => (specialty === "all" ? true : b.specialty === specialty))
-      .filter((b) => (statusFilter === "all" ? true : b.status === statusFilter));
-  }, [specialty, statusFilter]);
+  const filtered = useMemo(
+    () => filterBounties(bounties, filters),
+    [bounties, filters],
+  );
 
   const totalReward = bounties
     .filter((b) => b.status === "open")
@@ -41,11 +42,11 @@ export default function BountiesPage() {
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-white/70">
               对设计师人选还没有明确想法?发布悬赏让符合专业的设计师主动来报名,
-              你从中筛选合作。
+              你从中筛选合作。支持按一/二/三级专业与省份或城市筛选。
             </p>
           </div>
           <Button asChild size="lg" variant="brand">
-            <Link href="/bounties/new">
+            <Link href="/entrust/new?mode=bounty">
               <PlusCircle className="h-4 w-4" /> 发布悬赏项目
             </Link>
           </Button>
@@ -65,55 +66,31 @@ export default function BountiesPage() {
           </div>
           <div>
             <div className="text-2xl font-semibold tracking-tight">
-              {bounties.reduce((sum, b) => sum + b.applicants.length, 0)}
+              {bounties.reduce((sum, b) => sum + bountyApplicantCount(b), 0)}
             </div>
             <div className="text-xs text-white/60">设计师累计报名次数</div>
           </div>
         </div>
       </Card>
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-2">
-          {[{ value: "all", label: "全部专业" }, ...SPECIALTIES].map((s) => (
-            <button
-              key={s.value}
-              onClick={() => setSpecialty(s.value as any)}
-              className={`rounded-full border px-4 py-1.5 text-sm transition-colors ${
-                specialty === s.value
-                  ? "border-ink bg-ink text-white"
-                  : "border-ink-20 text-ink-60 hover:border-ink/40"
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {[
-            { value: "all", label: "全部状态" },
-            { value: "open", label: "开放报名" },
-            { value: "in_review", label: "审核中" },
-          ].map((s) => (
-            <button
-              key={s.value}
-              onClick={() => setStatusFilter(s.value as any)}
-              className={`rounded-full border px-4 py-1.5 text-sm transition-colors ${
-                statusFilter === s.value
-                  ? "border-ink bg-ink text-white"
-                  : "border-ink-20 text-ink-60 hover:border-ink/40"
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <BountyFiltersPanel
+        filters={filters}
+        onChange={setFilters}
+        onReset={() => setFilters(createDefaultBountyFilters())}
+        resultCount={filtered.length}
+      />
 
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {filtered.map((b) => (
-          <BountyCard key={b.id} bounty={b} />
-        ))}
-      </div>
+      {filtered.length === 0 ? (
+        <Card className="p-16 text-center text-ink-60">
+          没有符合筛选条件的悬赏，请放宽专业、地区或状态条件。
+        </Card>
+      ) : (
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((b) => (
+            <BountyCard key={b.id} bounty={b} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

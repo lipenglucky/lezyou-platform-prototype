@@ -4,13 +4,17 @@ import Image from "next/image";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getDesignerById } from "@/mocks/designers";
+import { useDesigner } from "@/lib/use-data";
+import { useRoleStore } from "@/store/role-store";
 import { ImagePlus, Pencil, Trash2 } from "lucide-react";
 
 export default function PortfolioPage() {
-  const designer = getDesignerById("designer_chen")!;
+  const identityId = useRoleStore((s) => s.identityId);
+  const { data: designer, loading } = useDesigner(identityId);
 
-  const grouped = designer.portfolio.reduce<Record<string, typeof designer.portfolio>>(
+  const grouped = (designer?.portfolio ?? []).reduce<
+    Record<string, NonNullable<typeof designer>["portfolio"]>
+  >(
     (acc, p) => {
       acc[p.category] = acc[p.category] || [];
       acc[p.category].push(p);
@@ -18,6 +22,10 @@ export default function PortfolioPage() {
     },
     {},
   );
+
+  if (loading || !designer) {
+    return <div className="py-20 text-center text-ink-60">正在加载作品...</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -27,7 +35,7 @@ export default function PortfolioPage() {
             作品管理
           </h2>
           <p className="mt-1 text-sm text-ink-60">
-            按项目类型分类管理作品案例,展示在你的个人主页对外公开。
+            按项目类型分类上传作品案例，公开展示于个人主页。上传并覆盖所需项目类型后，方可开启接单与平台项目匹配。
           </p>
         </div>
         <Button variant="brand">
