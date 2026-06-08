@@ -1,5 +1,5 @@
-# push 到 main 分支 → 自动部署到阿里云 ECS
-# GitHub Secrets：ECS_HOST、ECS_USER、ECS_SSH_KEY
+# push 到 main → 自动部署阿里云 ECS
+# Secrets: ECS_HOST, ECS_USER, ECS_SSH_KEY
 
 name: Deploy to ECS
 
@@ -18,12 +18,12 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Check secrets
+      - name: Validate secrets
         run: |
-          test -n "${{ secrets.ECS_HOST }}" || (echo "缺少 Secret: ECS_HOST" && exit 1)
-          test -n "${{ secrets.ECS_USER }}" || (echo "缺少 Secret: ECS_USER" && exit 1)
-          test -n "${{ secrets.ECS_SSH_KEY }}" || (echo "缺少 Secret: ECS_SSH_KEY" && exit 1)
-          echo "Secrets 已配置 ✓"
+          test -n "${{ secrets.ECS_HOST }}" || (echo "::error::缺少 ECS_HOST" && exit 1)
+          test -n "${{ secrets.ECS_USER }}" || (echo "::error::缺少 ECS_USER" && exit 1)
+          test -n "${{ secrets.ECS_SSH_KEY }}" || (echo "::error::缺少 ECS_SSH_KEY" && exit 1)
+          echo "Secrets OK"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,31 +42,37 @@ jobs:
             .
           ls -lh deploy.tar.gz
 
-      - name: Upload to ECS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.ECS_HOST }}
-          username: ${{ secrets.ECS_USER }}
-          key: ${{ secrets.ECS_SSH_KEY }}
-          port: 22
-          source: deploy.tar.gz
-          target: /opt/lezyou
-          overwrite: true
+      - name: Setup SSH key
+        env:
+          SSH_KEY: ${{ secrets.ECS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.ECS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Test SSH connection
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=15 \
+            "${{ secrets.ECS_USER }}@${{ secrets.ECS_HOST }}" "echo SSH_OK"
+
+      - name: Upload package
+        run: |
+          scp -i ~/.ssh/deploy_key -o ConnectTimeout=30 \
+            deploy.tar.gz \
+            "${{ secrets.ECS_USER }}@${{ secrets.ECS_HOST }}:/opt/lezyou/deploy.tar.gz"
 
       - name: Extract and deploy
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.ECS_HOST }}
-          username: ${{ secrets.ECS_USER }}
-          key: ${{ secrets.ECS_SSH_KEY }}
-          port: 22
-          command_timeout: 25m
-          script: |
-            set -e
-            cd /opt/lezyou
-            if [ -f .env ]; then cp -f .env /tmp/lezyou.env.bak; fi
-            tar xzf deploy.tar.gz
-            if [ -f /tmp/lezyou.env.bak ]; then cp -f /tmp/lezyou.env.bak .env; fi
-            rm -f deploy.tar.gz
-            chmod +x deploy/*.sh scripts/cron-order-timeouts.sh 2>/dev/null || true
-            bash deploy/remote-deploy.sh
+        run: |
+          ssh -i ~/.ssh/deploy_key -o ConnectTimeout=30 \
+            "${{ secrets.ECS_USER }}@${{ secrets.ECS_HOST }}" << 'ENDSSH'
+          set -e
+          cd /opt/lezyou
+          if [ -f .env ]; then cp -f .env /tmp/lezyou.env.bak; fi
+          tar xzf deploy.tar.gz
+          if [ -f /tmp/lezyou.env.bak ]; then cp -f /tmp/lezyou.env.bak .env; fi
+          rm -f deploy.tar.gz
+          chmod +x deploy/*.sh scripts/cron-order-timeouts.sh 2>/dev/null || true
+          bash deploy/remote-deploy.sh
+          ENDSSH
