@@ -52,7 +52,6 @@ export async function POST(req: NextRequest) {
       totalAmount: body.totalAmount,
       description: body.description ?? "",
       projectAreaSqm: body.projectAreaSqm,
-      projectAreaSqm: body.projectAreaSqm,
       selectedSlots: body.selectedSlots,
       selectedMonths: body.selectedMonths,
       address: body.address,

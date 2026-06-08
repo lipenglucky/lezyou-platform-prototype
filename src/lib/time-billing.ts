@@ -51,7 +51,7 @@ export function formatCutoffTime(hour = BILLING_CUTOFF_HOUR): string {
 export function getContractServiceEnd(order: Order): string | null {
   if (order.onsiteSchedule?.to) return order.onsiteSchedule.to;
   if (order.selectedSlots?.length) {
-    return slotsToDateRange(order.selectedSlots).to;
+    return slotsToDateRange(order.selectedSlots)?.to ?? null;
   }
   if (order.selectedMonths?.length) {
     const last = [...order.selectedMonths].sort().at(-1)!;

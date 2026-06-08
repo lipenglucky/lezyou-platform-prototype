@@ -88,7 +88,7 @@ function ClientOrderDetailInner({ id }: { id: string }) {
     const stageId = searchParams.get("payStage");
     if (!stageId || !order) return;
     const stage = order.stages.find((s) => s.id === stageId);
-    if (stage && stage.paymentStatus !== "paid" && stage.paymentStatus !== "released") {
+    if (stage && stage.status !== "paid" && stage.status !== "released") {
       setPayTarget({
         stageId: stage.id,
         name: stage.name,

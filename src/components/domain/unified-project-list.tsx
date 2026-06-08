@@ -44,6 +44,7 @@ import {
   type ProjectListCategory,
 } from "@/lib/unified-project-list";
 import type { ScanOrder } from "@/lib/scan-order";
+import type { OrderStatus } from "@/lib/types";
 import type { DraftOrderPayload } from "@/store/session-store";
 import { useBounties, useClients, useDesigners, useOrders } from "@/lib/use-data";
 
@@ -184,8 +185,10 @@ export function UnifiedProjectList({
         list = filterItemsByClientStatus(list, status as ClientOrderStatusFilter);
       } else if (useDesignerProjectStatus) {
         list = filterItemsByDesignerStatus(list, status as DesignerOrderStatusFilter);
+      } else if (perspective === "client") {
+        list = filterItemsByClientStatus(list, status as ClientOrderStatusFilter);
       } else {
-        list = filterByStatus(list, status as ClientOrderStatusFilter);
+        list = filterByStatus(list, status as OrderStatus | "all");
       }
       if (listFilterMode) {
         list = filterBySpecialty(list, specialty);

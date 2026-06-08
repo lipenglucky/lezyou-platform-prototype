@@ -3,6 +3,7 @@ import { normalizeBountyTrack } from "@/lib/bounty-tracks";
 import { prisma } from "./db";
 import type {
   AdminClientRow,
+  AdminDesignerRow,
   Bounty,
   Client,
   Designer,
@@ -145,6 +146,7 @@ export async function listDesignersForAdmin() {
   });
   const ongoingByDesigner = new Map<string, number>();
   for (const o of orderRows) {
+    if (!o.designerId) continue;
     if (ONGOING_ORDER_STATUSES.has(o.status)) {
       ongoingByDesigner.set(
         o.designerId,
@@ -934,8 +936,8 @@ export async function saveLevelManagement(config: LevelManagementConfig) {
 
 export async function getLevelManagementStats(): Promise<CategoryLevelStats[]> {
   const config = await getLevelManagement();
-  let designers = await listDesignersForAdmin();
-  let clients = await listClientsForAdmin();
+  let designers: AdminDesignerRow[] = await listDesignersForAdmin();
+  let clients: AdminClientRow[] = await listClientsForAdmin();
   if (demoDataEnabled()) {
     if (designers.length === 0) designers = mockDesigners;
     if (clients.length === 0) clients = mockClients;

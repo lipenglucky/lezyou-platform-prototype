@@ -54,6 +54,7 @@ export function DesignerWorkCalendar({
   onAddEvent,
   onAddEvents,
   onRemoveEvent,
+  onUpdateWorkContents,
   initialYear = 2026,
   initialMonth = 5,
 }: {
@@ -75,7 +76,7 @@ export function DesignerWorkCalendar({
     }>,
   ) => void;
   onRemoveEvent: (eventId: string) => void;
-  onUpdateWorkContents: (eventId: string, lines: string[]) => boolean;
+  onUpdateWorkContents: (eventId: string, lines: string[]) => boolean | Promise<boolean>;
   initialYear?: number;
   initialMonth?: number;
 }) {
