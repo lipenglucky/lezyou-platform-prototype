@@ -6,6 +6,8 @@ node_modules
 *.log
 dist
 out
+prisma/dev.db
+prisma/dev.db-journal
 backups/
 .vercel
 .cache

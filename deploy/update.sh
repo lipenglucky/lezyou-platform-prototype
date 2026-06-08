@@ -18,10 +18,8 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# 内测模式：COOKIE_SECURE=false 且 PUBLIC_BASE_URL 含 :3000
-COMPOSE_FILES="-f docker-compose.yml"
-if [ -f .env ] && grep -q "^COOKIE_SECURE=false" .env; then
-  COMPOSE_FILES="-f docker-compose.yml -f docker-compose.internal.yml"
+# 内测模式：COOKIE_SECURE=false
+if grep -q "^COOKIE_SECURE=false" .env 2>/dev/null; then
   echo "[update] 内测模式（3000 对外）"
 fi
 
@@ -37,15 +35,8 @@ elif [ "$SKIP_PULL" = false ]; then
 fi
 
 echo "[update] 重新构建并启动..."
-docker compose $COMPOSE_FILES up -d --build
-
-echo "[update] 同步数据库结构..."
-docker compose exec -T app npm run prod:db:push
+bash deploy/remote-deploy.sh
 
 echo "[update] 健康检查..."
 sleep 3
-bash deploy/health-check.sh
-
-echo ""
-echo "[update] 更新完成 ✓"
-docker compose ps
+bash deploy/health-check.sh || true

@@ -87,7 +87,9 @@ npm run dev
 
 ### ECS 完整部署手册
 
-**从零部署、更新、备份、HTTPS 上线** 见 **[deploy/DEPLOY.md](deploy/DEPLOY.md)**（含一键脚本 `deploy/ecs-init.sh`、`deploy/deploy.sh`、`deploy/update.sh`）。
+**从零部署、更新、备份、HTTPS 上线** 见 **[deploy/DEPLOY.md](deploy/DEPLOY.md)**。
+
+**GitHub push 自动部署 ECS** 见 **[deploy/CI-CD.md](deploy/CI-CD.md)**。
 
 ### 内测部署（阿里云 ECS · 约 15 分钟）
 

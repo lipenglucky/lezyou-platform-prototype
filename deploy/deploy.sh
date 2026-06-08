@@ -45,7 +45,7 @@ echo "[deploy] 构建并启动容器（模式: $MODE）..."
 if [ "$MODE" = "internal" ]; then
   docker compose -f docker-compose.yml -f docker-compose.internal.yml up -d --build
 else
-  docker compose up -d --build
+  docker compose -f docker-compose.yml -f docker-compose.production.yml up -d --build
 fi
 
 echo "[deploy] 等待应用就绪..."

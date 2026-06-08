@@ -1,0 +1,63 @@
+# push 到 main 分支 → 自动部署到阿里云 ECS
+# 需在 GitHub 仓库 Settings → Secrets 配置：ECS_HOST、ECS_USER、ECS_SSH_KEY
+
+name: Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ecs
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pack source
+        run: |
+          tar czf deploy.tar.gz \
+            --exclude=node_modules \
+            --exclude=.next \
+            --exclude=prisma/dev.db \
+            --exclude=prisma/dev.db-journal \
+            --exclude=.git \
+            --exclude=.env \
+            --exclude=backups \
+            --exclude=deploy.tar.gz \
+            .
+
+      - name: Upload to ECS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          port: ${{ secrets.ECS_SSH_PORT || 22 }}
+          source: deploy.tar.gz
+          target: /opt/lezyou
+
+      - name: Extract and deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          port: ${{ secrets.ECS_SSH_PORT || 22 }}
+          command_timeout: 25m
+          script: |
+            set -e
+            cd /opt/lezyou
+            if [ -f .env ]; then cp -f .env /tmp/lezyou.env.bak; fi
+            tar xzf deploy.tar.gz
+            if [ -f /tmp/lezyou.env.bak ]; then cp -f /tmp/lezyou.env.bak .env; fi
+            rm -f deploy.tar.gz
+            chmod +x deploy/*.sh scripts/cron-order-timeouts.sh 2>/dev/null || true
+            bash deploy/remote-deploy.sh
