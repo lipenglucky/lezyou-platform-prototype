@@ -30,11 +30,15 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-echo "[deploy] 运行部署前预检..."
-if [ "$MODE" = "production" ]; then
-  node scripts/deploy-preflight.mjs --production || exit 1
+if command -v node >/dev/null 2>&1; then
+  echo "[deploy] 运行部署前预检..."
+  if [ "$MODE" = "production" ]; then
+    node scripts/deploy-preflight.mjs --production || exit 1
+  else
+    node scripts/deploy-preflight.mjs || exit 1
+  fi
 else
-  node scripts/deploy-preflight.mjs || exit 1
+  echo "[deploy] 跳过预检（宿主机未安装 node，Docker 内会自动处理）"
 fi
 
 echo "[deploy] 构建并启动容器（模式: $MODE）..."
